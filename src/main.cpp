@@ -7,6 +7,8 @@
 #include <hyprland/src/render/OpenGL.hpp>
 #include <hyprland/src/render/Renderer.hpp>
 
+#include <lua.hpp>
+
 #include "globals.hpp"
 #include "overview.hpp"
 
@@ -57,6 +59,13 @@ static SDispatchResult onWinviewDispatcher(std::string arg) {
     return {};
 }
 
+static int luaWinviewOverview(lua_State* L) {
+    const auto RESULT = onWinviewDispatcher(luaL_optstring(L, 1, "toggle"));
+    if (!RESULT.success)
+        return luaL_error(L, "%s", RESULT.error.c_str());
+    return 0;
+}
+
 APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     PHANDLE = handle;
 
@@ -85,6 +94,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     });
 
     HyprlandAPI::addDispatcherV2(PHANDLE, "hyprwinview:overview", ::onWinviewDispatcher);
+    HyprlandAPI::addLuaFunction(PHANDLE, "hyprwinview", "overview", ::luaWinviewOverview);
     HyprlandAPI::reloadConfig();
 
     HyprlandAPI::addNotification(PHANDLE, "[hyprwinview] Initialized successfully", CHyprColor{0.2, 1.0, 0.2, 1.0}, 5000);
