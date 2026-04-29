@@ -2,7 +2,7 @@
   description = "hyprwinview, a window overview plugin for Hyprland";
 
   inputs = {
-    hyprland.url = "git+https://github.com/hyprwm/Hyprland?submodules=1&ref=refs/pull/13817/head";
+    hyprland.url = "git+https://github.com/hyprwm/Hyprland?submodules=1";
     nixpkgs.follows = "hyprland/nixpkgs";
     systems.follows = "hyprland/systems";
   };
