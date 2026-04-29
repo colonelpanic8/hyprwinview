@@ -2,6 +2,9 @@
 
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/config/ConfigManager.hpp>
+#include <hyprland/src/config/values/types/ColorValue.hpp>
+#include <hyprland/src/config/values/types/IntValue.hpp>
+#include <hyprland/src/debug/log/Logger.hpp>
 #include <hyprland/src/desktop/state/FocusState.hpp>
 #include <hyprland/src/event/EventBus.hpp>
 #include <hyprland/src/render/OpenGL.hpp>
@@ -18,6 +21,16 @@ APICALL EXPORT std::string PLUGIN_API_VERSION() {
 
 static void failNotif(const std::string& reason) {
     HyprlandAPI::addNotification(PHANDLE, "[hyprwinview] Failure in initialization: " + reason, CHyprColor{1.0, 0.2, 0.2, 1.0}, 5000);
+}
+
+static bool addConfigValue(SP<Config::Values::IValue> value) {
+    const auto RET = Config::mgr()->registerPluginValue(PHANDLE, value);
+    if (!RET) {
+        Log::logger->log(Log::ERR, "[hyprwinview] failed to register plugin value \"{}\": {}", value->name(), RET.error());
+        return false;
+    }
+
+    return true;
 }
 
 static SDispatchResult onWinviewDispatcher(std::string arg) {
@@ -77,12 +90,12 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         throw std::runtime_error("[hyprwinview] Version mismatch");
     }
 
-    HyprlandAPI::addConfigValue(PHANDLE, "plugin:hyprwinview:gap_size", Hyprlang::INT{24});
-    HyprlandAPI::addConfigValue(PHANDLE, "plugin:hyprwinview:margin", Hyprlang::INT{48});
-    HyprlandAPI::addConfigValue(PHANDLE, "plugin:hyprwinview:bg_col", Hyprlang::INT{*configStringToInt("rgba(101014ee)")});
-    HyprlandAPI::addConfigValue(PHANDLE, "plugin:hyprwinview:border_col", Hyprlang::INT{*configStringToInt("rgba(ffffff33)")});
-    HyprlandAPI::addConfigValue(PHANDLE, "plugin:hyprwinview:hover_border_col", Hyprlang::INT{*configStringToInt("rgba(66ccffee)")});
-    HyprlandAPI::addConfigValue(PHANDLE, "plugin:hyprwinview:border_size", Hyprlang::INT{3});
+    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprwinview:gap_size", "gap size", 24));
+    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprwinview:margin", "margin", 48));
+    addConfigValue(makeShared<Config::Values::CColorValue>("plugin:hyprwinview:bg_col", "background color", 0xEE101014));
+    addConfigValue(makeShared<Config::Values::CColorValue>("plugin:hyprwinview:border_col", "border color", 0x33FFFFFF));
+    addConfigValue(makeShared<Config::Values::CColorValue>("plugin:hyprwinview:hover_border_col", "hover border color", 0xEE66CCFF));
+    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprwinview:border_size", "border size", 3));
 
     static auto renderStage = Event::bus()->m_events.render.stage.listen([](eRenderStage stage) {
         if (stage != RENDER_LAST_MOMENT || !g_pWindowOverview)

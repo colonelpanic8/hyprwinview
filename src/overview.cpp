@@ -20,33 +20,33 @@
 #include "WinviewPassElement.hpp"
 #include "globals.hpp"
 
-static const CConfigValue<Hyprlang::INT>& PGAP() {
-    static const CConfigValue<Hyprlang::INT> VALUE("plugin:hyprwinview:gap_size");
+static const CConfigValue<Config::INTEGER>& PGAP() {
+    static const CConfigValue<Config::INTEGER> VALUE("plugin:hyprwinview:gap_size");
     return VALUE;
 }
 
-static const CConfigValue<Hyprlang::INT>& PMARGIN() {
-    static const CConfigValue<Hyprlang::INT> VALUE("plugin:hyprwinview:margin");
+static const CConfigValue<Config::INTEGER>& PMARGIN() {
+    static const CConfigValue<Config::INTEGER> VALUE("plugin:hyprwinview:margin");
     return VALUE;
 }
 
-static const CConfigValue<Hyprlang::INT>& PBG() {
-    static const CConfigValue<Hyprlang::INT> VALUE("plugin:hyprwinview:bg_col");
+static const CConfigValue<Config::INTEGER>& PBG() {
+    static const CConfigValue<Config::INTEGER> VALUE("plugin:hyprwinview:bg_col");
     return VALUE;
 }
 
-static const CConfigValue<Hyprlang::INT>& PBORDER() {
-    static const CConfigValue<Hyprlang::INT> VALUE("plugin:hyprwinview:border_col");
+static const CConfigValue<Config::INTEGER>& PBORDER() {
+    static const CConfigValue<Config::INTEGER> VALUE("plugin:hyprwinview:border_col");
     return VALUE;
 }
 
-static const CConfigValue<Hyprlang::INT>& PHOVERBORDER() {
-    static const CConfigValue<Hyprlang::INT> VALUE("plugin:hyprwinview:hover_border_col");
+static const CConfigValue<Config::INTEGER>& PHOVERBORDER() {
+    static const CConfigValue<Config::INTEGER> VALUE("plugin:hyprwinview:hover_border_col");
     return VALUE;
 }
 
-static const CConfigValue<Hyprlang::INT>& PBORDERSIZE() {
-    static const CConfigValue<Hyprlang::INT> VALUE("plugin:hyprwinview:border_size");
+static const CConfigValue<Config::INTEGER>& PBORDERSIZE() {
+    static const CConfigValue<Config::INTEGER> VALUE("plugin:hyprwinview:border_size");
     return VALUE;
 }
 
@@ -132,8 +132,8 @@ void CWindowOverview::updateLayout() {
 
     rows = std::max(1, (int)std::ceil(count / cols));
 
-    const double margin = std::max<Hyprlang::INT>(0, *PMARGIN());
-    const double gap    = std::max<Hyprlang::INT>(0, *PGAP());
+    const double margin = std::max<Config::INTEGER>(0, *PMARGIN());
+    const double gap    = std::max<Config::INTEGER>(0, *PGAP());
     const double areaW  = std::max(1.0, pMonitor->m_size.x - margin * 2.0);
     const double areaH  = std::max(1.0, pMonitor->m_size.y - margin * 2.0);
     const double cellW  = (areaW - gap * (cols - 1)) / cols;
@@ -200,7 +200,7 @@ void CWindowOverview::draw() {
 
     const auto SCALE       = pMonitor->m_scale;
     const auto HOVERED    = hoveredIndex();
-    const int  BORDER     = std::max<Hyprlang::INT>(0, *PBORDERSIZE());
+    const int  BORDER     = std::max<Config::INTEGER>(0, *PBORDERSIZE());
     CRegion    fullDamage = {0, 0, INT16_MAX, INT16_MAX};
 
     Render::GL::g_pHyprOpenGL->renderRect(CBox{{0, 0}, pMonitor->m_pixelSize}, CHyprColor(*PBG()).stripA(), {.damage = &fullDamage});
