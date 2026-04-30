@@ -496,6 +496,15 @@ static double visibleAmountForElapsed(double elapsedMs, double durationMs, bool 
     return closing ? 1.0 - easeInCubic(T) : easeOutCubic(T);
 }
 
+static double rawProgressForVisibleAmount(double visible, bool closing) {
+    visible = std::clamp(visible, 0.0, 1.0);
+
+    if (closing)
+        return std::cbrt(1.0 - visible);
+
+    return 1.0 - std::cbrt(1.0 - visible);
+}
+
 static CBox scaleBoxFromCenter(const CBox& box, double scale) {
     const auto CENTER = box.middle();
     const auto W      = box.w * scale;
@@ -1071,11 +1080,20 @@ CBox CWindowOverview::animatedTileLogicalBox(size_t index, double progress) cons
     const auto  SPLIT   = workspaceZoomStageRatio();
     const auto  PANEL   = workspacePanelBoxForPreview(PREVIEW);
     const auto  FINAL   = PREVIEW.tileLogical;
+    const auto  RAW     = rawProgressForVisibleAmount(progress, closing);
 
-    if (progress <= SPLIT)
-        return workspaceZoomCameraBoxForPanelBox(PANEL, easeOutCubic(progress / SPLIT));
+    if (closing) {
+        const auto GATHER_DURATION = 1.0 - SPLIT;
+        if (RAW <= GATHER_DURATION)
+            return lerpBox(FINAL, PANEL, easeInCubic(RAW / GATHER_DURATION));
 
-    return lerpBox(PANEL, FINAL, easeOutCubic((progress - SPLIT) / (1.0 - SPLIT)));
+        return workspaceZoomCameraBoxForPanelBox(PANEL, 1.0 - easeInCubic((RAW - GATHER_DURATION) / SPLIT));
+    }
+
+    if (RAW <= SPLIT)
+        return workspaceZoomCameraBoxForPanelBox(PANEL, easeOutCubic(RAW / SPLIT));
+
+    return lerpBox(PANEL, FINAL, easeOutCubic((RAW - SPLIT) / (1.0 - SPLIT)));
 }
 
 double CWindowOverview::animatedTileTextureAlpha(size_t index, double progress) const {
