@@ -46,6 +46,7 @@ namespace {
         std::string name;
         std::string type      = "Threshold";
         int         size      = 0;
+        int         scale     = 1;
         int         minSize   = 0;
         int         maxSize   = 0;
         int         threshold = 2;
@@ -65,7 +66,11 @@ namespace {
     std::unordered_map<std::string, STextureCacheEntry>           g_textureCache;
     std::optional<std::vector<SDesktopEntry>>                     g_desktopEntries;
 
-    const CConfigValue<Config::STRING>&                           PAPPICONTHEME() {
+    // Prefer a larger raster over upscaling a smaller one whenever the theme
+    // provides one; the rendered texture is still capped by app_icon_size.
+    constexpr int                       UNDERSIZED_RASTER_PENALTY = 1'000'000;
+
+    const CConfigValue<Config::STRING>& PAPPICONTHEME() {
         static const CConfigValue<Config::STRING> VALUE("plugin:hyprwinview:app_icon_theme");
         return VALUE;
     }
@@ -372,21 +377,30 @@ namespace {
     }
 
     int iconDirectoryDistance(const SIconThemeDirectory& dir, int sizePx) {
-        const auto TYPE = lowercase(dir.type);
+        const auto TYPE      = lowercase(dir.type);
+        const int  SCALE     = std::max(1, dir.scale);
+        const int  SIZE      = dir.size * SCALE;
+        const int  MIN_SIZE  = dir.minSize * SCALE;
+        const int  MAX_SIZE  = dir.maxSize * SCALE;
+        const int  THRESHOLD = dir.threshold * SCALE;
 
         if (TYPE == "scalable") {
-            if (sizePx >= dir.minSize && sizePx <= dir.maxSize)
+            if (sizePx >= MIN_SIZE && sizePx <= MAX_SIZE)
                 return 0;
-            return std::min(std::abs(sizePx - dir.minSize), std::abs(sizePx - dir.maxSize));
+            return std::min(std::abs(sizePx - MIN_SIZE), std::abs(sizePx - MAX_SIZE));
         }
 
         if (TYPE == "threshold") {
-            if (std::abs(sizePx - dir.size) <= dir.threshold)
+            if (std::abs(sizePx - SIZE) <= THRESHOLD)
                 return 0;
-            return std::abs(sizePx - dir.size) - dir.threshold;
+            return std::abs(sizePx - SIZE) - THRESHOLD;
         }
 
-        return std::abs(sizePx - dir.size);
+        return std::abs(sizePx - SIZE);
+    }
+
+    int iconDirectoryNominalSize(const SIconThemeDirectory& dir) {
+        return dir.size * std::max(1, dir.scale);
     }
 
     int fallbackSizeFromPath(const fs::path& path) {
@@ -394,8 +408,13 @@ namespace {
             --it;
             const auto PART = it->string();
             const auto X    = PART.find('x');
-            if (X != std::string::npos)
-                return std::max(parseInt(PART.substr(0, X), 0), parseInt(PART.substr(X + 1), 0));
+            if (X != std::string::npos) {
+                const auto SCALE_MARKER = PART.find('@', X + 1);
+                const int  SIZE =
+                    std::max(parseInt(PART.substr(0, X), 0), parseInt(PART.substr(X + 1, SCALE_MARKER == std::string::npos ? std::string::npos : SCALE_MARKER - X - 1), 0));
+                const int SCALE = SCALE_MARKER == std::string::npos ? 1 : parseInt(PART.substr(SCALE_MARKER + 1), 1);
+                return SIZE * std::max(1, SCALE);
+            }
 
             const auto SIZE = parseInt(PART, 0);
             if (SIZE > 0)
@@ -410,7 +429,7 @@ namespace {
         const bool SVG        = EXT == ".svg";
         const bool UNDERSIZED = !scalable && nominalSize > 0 && nominalSize < sizePx;
 
-        return (UNDERSIZED ? 500 : 0) + (SVG ? 0 : 10) + (nominalSize >= sizePx ? 0 : 50);
+        return (UNDERSIZED ? UNDERSIZED_RASTER_PENALTY : 0) + (SVG ? 0 : 10) + (nominalSize >= sizePx ? 0 : 50);
     }
 
     std::optional<SIconTheme> loadIconTheme(const std::string& themeName) {
@@ -456,6 +475,8 @@ namespace {
                         dir.name = dirName;
                         if (const auto SIZE = DIR_SECTION->second.find("Size"); SIZE != DIR_SECTION->second.end())
                             dir.size = parseInt(SIZE->second, 0);
+                        if (const auto SCALE = DIR_SECTION->second.find("Scale"); SCALE != DIR_SECTION->second.end())
+                            dir.scale = std::max(1, parseInt(SCALE->second, 1));
                         if (const auto TYPE = DIR_SECTION->second.find("Type"); TYPE != DIR_SECTION->second.end())
                             dir.type = TYPE->second;
                         if (const auto MIN = DIR_SECTION->second.find("MinSize"); MIN != DIR_SECTION->second.end())
@@ -469,7 +490,7 @@ namespace {
                         if (const auto THRESHOLD = DIR_SECTION->second.find("Threshold"); THRESHOLD != DIR_SECTION->second.end())
                             dir.threshold = parseInt(THRESHOLD->second, 2);
 
-                        if (dir.size > 0 || lowercase(dir.type) == "scalable")
+                        if (iconDirectoryNominalSize(dir) > 0 || lowercase(dir.type) == "scalable")
                             theme.directories.push_back(dir);
                     }
                 }
@@ -496,7 +517,7 @@ namespace {
         for (const auto& dir : THEME->directories) {
             const bool SCALABLE = lowercase(dir.type) == "scalable";
             const int  DISTANCE = iconDirectoryDistance(dir, sizePx);
-            const int  NOMINAL  = SCALABLE ? sizePx : dir.size;
+            const int  NOMINAL  = SCALABLE ? sizePx : iconDirectoryNominalSize(dir);
 
             for (const auto& root : THEME->roots) {
                 for (const auto& fileName : iconFileNames(iconName)) {
