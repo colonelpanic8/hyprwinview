@@ -7,5 +7,5 @@ jobs:
     secrets: inherit
     with:
       command: |
-        nix flake update
         nix flake check -L --keep-going
+        nix build -L .#hyprwinview

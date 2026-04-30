@@ -30,13 +30,15 @@ APICALL EXPORT std::string PLUGIN_API_VERSION() {
 }
 
 static void failNotif(const std::string& reason) {
-    HyprlandAPI::addNotification(PHANDLE, "[hyprwinview] Failure in initialization: " + reason, CHyprColor{1.0, 0.2, 0.2, 1.0}, 5000);
+    HyprlandAPI::addNotification(PHANDLE, "[hyprwinview] Failure in initialization: " + reason,
+                                 CHyprColor{1.0, 0.2, 0.2, 1.0}, 5000);
 }
 
 static bool addConfigValue(SP<Config::Values::IValue> value) {
     const auto RET = Config::mgr()->registerPluginValue(PHANDLE, value);
     if (!RET) {
-        Log::logger->log(Log::ERR, "[hyprwinview] failed to register plugin value \"{}\": {}", value->name(), RET.error());
+        Log::logger->log(Log::ERR, "[hyprwinview] failed to register plugin value \"{}\": {}",
+                         value->name(), RET.error());
         return false;
     }
 
@@ -77,18 +79,22 @@ static std::vector<std::string> argTokens(const std::string& arg) {
 }
 
 static bool isDispatcherAction(const std::string& token) {
-    return token == "select" || token == "bring" || token == "bring-replace" || token == "replace" || token == "off" || token == "close" || token == "disable" ||
+    return token == "select" || token == "bring" || token == "bring-replace" ||
+        token == "replace" || token == "off" || token == "close" || token == "disable" ||
         token == "toggle" || token == "open" || token == "show" || token == "on";
 }
 
 static bool applyOverviewOption(const std::string& token, SWindowOverviewOptions& options) {
-    if (token == "exclude-current-workspace" || token == "without-current-workspace" || token == "no-current-workspace" || token == "other-workspaces" ||
-        token == "not-current-workspace" || token == "include-current-workspace=false" || token == "current-workspace=false") {
+    if (token == "exclude-current-workspace" || token == "without-current-workspace" ||
+        token == "no-current-workspace" || token == "other-workspaces" ||
+        token == "not-current-workspace" || token == "include-current-workspace=false" ||
+        token == "current-workspace=false") {
         options.includeCurrentWorkspace = false;
         return true;
     }
 
-    if (token == "all" || token == "default" || token == "include-current-workspace" || token == "with-current-workspace" || token == "current-workspace" ||
+    if (token == "all" || token == "default" || token == "include-current-workspace" ||
+        token == "with-current-workspace" || token == "current-workspace" ||
         token == "include-current-workspace=true" || token == "current-workspace=true") {
         options.includeCurrentWorkspace = true;
         return true;
@@ -97,7 +103,8 @@ static bool applyOverviewOption(const std::string& token, SWindowOverviewOptions
     return false;
 }
 
-static std::optional<SWinviewDispatcherArgs> parseWinviewDispatcherArgs(const std::string& arg, std::string& error) {
+static std::optional<SWinviewDispatcherArgs> parseWinviewDispatcherArgs(const std::string& arg,
+                                                                        std::string&       error) {
     SWinviewDispatcherArgs args;
     bool                   sawAction = false;
 
@@ -190,14 +197,18 @@ static int luaWinviewOverview(lua_State* L) {
             if (lua_isboolean(L, -1) && lua_toboolean(L, -1))
                 arg += " exclude-current-workspace";
             else if (!lua_isnil(L, -1) && !lua_isboolean(L, -1))
-                return luaL_error(L, "hyprwinview.overview: field \"exclude_current_workspace\" must be a boolean");
+                return luaL_error(
+                    L,
+                    "hyprwinview.overview: field \"exclude_current_workspace\" must be a boolean");
             lua_pop(L, 1);
 
             lua_getfield(L, 1, "include_current_workspace");
             if (lua_isboolean(L, -1) && !lua_toboolean(L, -1))
                 arg += " exclude-current-workspace";
             else if (!lua_isnil(L, -1) && !lua_isboolean(L, -1))
-                return luaL_error(L, "hyprwinview.overview: field \"include_current_workspace\" must be a boolean");
+                return luaL_error(
+                    L,
+                    "hyprwinview.overview: field \"include_current_workspace\" must be a boolean");
             lua_pop(L, 1);
         } else if (lua_isstring(L, 1))
             arg = lua_tostring(L, 1);
@@ -211,7 +222,8 @@ static int luaWinviewOverview(lua_State* L) {
     return 0;
 }
 
-static std::vector<std::string> luaStringListField(lua_State* L, int tableIdx, const char* field, const std::vector<std::string>& fallback) {
+static std::vector<std::string> luaStringListField(lua_State* L, int tableIdx, const char* field,
+                                                   const std::vector<std::string>& fallback) {
     tableIdx = lua_absindex(L, tableIdx);
     lua_getfield(L, tableIdx, field);
 
@@ -230,7 +242,8 @@ static std::vector<std::string> luaStringListField(lua_State* L, int tableIdx, c
     for (size_t i = 1; i <= LEN; ++i) {
         lua_rawgeti(L, -1, i);
         if (!lua_isstring(L, -1))
-            luaL_error(L, "hyprwinview.configure: field \"%s\" item %zu must be a string", field, i);
+            luaL_error(L, "hyprwinview.configure: field \"%s\" item %zu must be a string", field,
+                       i);
         result.emplace_back(lua_tostring(L, -1));
         lua_pop(L, 1);
     }
@@ -240,14 +253,14 @@ static std::vector<std::string> luaStringListField(lua_State* L, int tableIdx, c
 }
 
 static void readKeyTable(lua_State* L, int tableIdx, SWinviewKeyConfig& config) {
-    config.left  = luaStringListField(L, tableIdx, "left", config.left);
-    config.right = luaStringListField(L, tableIdx, "right", config.right);
-    config.up    = luaStringListField(L, tableIdx, "up", config.up);
-    config.down  = luaStringListField(L, tableIdx, "down", config.down);
-    config.go    = luaStringListField(L, tableIdx, "go", config.go);
-    config.bring = luaStringListField(L, tableIdx, "bring", config.bring);
+    config.left         = luaStringListField(L, tableIdx, "left", config.left);
+    config.right        = luaStringListField(L, tableIdx, "right", config.right);
+    config.up           = luaStringListField(L, tableIdx, "up", config.up);
+    config.down         = luaStringListField(L, tableIdx, "down", config.down);
+    config.go           = luaStringListField(L, tableIdx, "go", config.go);
+    config.bring        = luaStringListField(L, tableIdx, "bring", config.bring);
     config.bringReplace = luaStringListField(L, tableIdx, "bring_replace", config.bringReplace);
-    config.close = luaStringListField(L, tableIdx, "close", config.close);
+    config.close        = luaStringListField(L, tableIdx, "close", config.close);
 
     config.left  = luaStringListField(L, tableIdx, "keys_left", config.left);
     config.right = luaStringListField(L, tableIdx, "keys_right", config.right);
@@ -255,7 +268,8 @@ static void readKeyTable(lua_State* L, int tableIdx, SWinviewKeyConfig& config) 
     config.down  = luaStringListField(L, tableIdx, "keys_down", config.down);
     config.go    = luaStringListField(L, tableIdx, "keys_go", config.go);
     config.bring = luaStringListField(L, tableIdx, "keys_bring", config.bring);
-    config.bringReplace = luaStringListField(L, tableIdx, "keys_bring_replace", config.bringReplace);
+    config.bringReplace =
+        luaStringListField(L, tableIdx, "keys_bring_replace", config.bringReplace);
     config.close = luaStringListField(L, tableIdx, "keys_close", config.close);
 }
 
@@ -289,48 +303,98 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         throw std::runtime_error("[hyprwinview] Version mismatch");
     }
 
-    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprwinview:gap_size", "gap size", 24));
-    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprwinview:margin", "margin", 48));
-    addConfigValue(makeShared<Config::Values::CColorValue>("plugin:hyprwinview:background", "background color", 0x99101014));
-    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprwinview:background_blur", "blur the background behind the overview", 0));
-    addConfigValue(makeShared<Config::Values::CColorValue>("plugin:hyprwinview:bg_col", "legacy background color alias", 0x99101014));
-    addConfigValue(makeShared<Config::Values::CColorValue>("plugin:hyprwinview:border_col", "border color", 0x33FFFFFF));
-    addConfigValue(makeShared<Config::Values::CColorValue>("plugin:hyprwinview:hover_border_col", "hover border color", 0xEE66CCFF));
-    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprwinview:border_size", "border size", 3));
-    addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprwinview:window_order", "overview window ordering strategy", "natural"));
-    addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprwinview:keys_left", "left keys", "a,h,left"));
-    addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprwinview:keys_right", "right keys", "d,l,right"));
-    addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprwinview:keys_up", "up keys", "w,k,up"));
-    addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprwinview:keys_down", "down keys", "s,j,down"));
-    addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprwinview:keys_go", "go keys", "return,enter,space,g,f"));
-    addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprwinview:keys_bring", "bring keys", "b,shift+return,shift+space"));
-    addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprwinview:keys_bring_replace", "bring replace keys", "shift+b"));
-    addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprwinview:keys_close", "close keys", "escape,q"));
-    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprwinview:show_app_icon", "show app icon overlays", 0));
-    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprwinview:app_icon_size", "app icon size", 48));
-    addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprwinview:app_icon_theme", "app icon theme override", ""));
-    addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprwinview:app_icon_theme_source", "app icon theme source", "auto"));
-    addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprwinview:app_icon_overrides", "app icon app_id=icon overrides", ""));
-    addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprwinview:app_icon_position", "app icon position", "bottom right"));
-    addConfigValue(makeShared<Config::Values::CFloatValue>("plugin:hyprwinview:app_icon_anchor_x", "app icon normalized x anchor override", -1.0F));
-    addConfigValue(makeShared<Config::Values::CFloatValue>("plugin:hyprwinview:app_icon_anchor_y", "app icon normalized y anchor override", -1.0F));
-    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprwinview:app_icon_margin_x", "app icon horizontal margin", 10));
-    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprwinview:app_icon_margin_y", "app icon vertical margin", 10));
-    addConfigValue(makeShared<Config::Values::CFloatValue>("plugin:hyprwinview:app_icon_margin_relative_x", "app icon relative horizontal margin", 0.0F));
-    addConfigValue(makeShared<Config::Values::CFloatValue>("plugin:hyprwinview:app_icon_margin_relative_y", "app icon relative vertical margin", 0.0F));
-    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprwinview:app_icon_offset_x", "app icon horizontal offset", 0));
-    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprwinview:app_icon_offset_y", "app icon vertical offset", 0));
-    addConfigValue(makeShared<Config::Values::CColorValue>("plugin:hyprwinview:app_icon_backplate_col", "app icon backplate color", 0x66000000));
-    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprwinview:app_icon_backplate_padding", "app icon backplate padding", 6));
-    addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprwinview:animation", "overview animation mode", "workspace_zoom"));
-    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprwinview:animation_in_ms", "overview open animation duration in milliseconds", 280));
-    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprwinview:animation_out_ms", "overview close animation duration in milliseconds", 220));
-    addConfigValue(makeShared<Config::Values::CFloatValue>("plugin:hyprwinview:animation_speed", "overview animation speed multiplier", 1.0F));
-    addConfigValue(makeShared<Config::Values::CFloatValue>("plugin:hyprwinview:animation_scale", "overview fade_scale starting scale", 0.94F));
-    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprwinview:animation_stagger_ms", "overview staggered animation delay between tiles in milliseconds", 16));
-    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprwinview:animation_stagger_max_ms", "overview staggered animation maximum tile delay in milliseconds", 120));
-    addConfigValue(makeShared<Config::Values::CFloatValue>("plugin:hyprwinview:animation_workspace_zoom_stage_ratio", "overview workspace_zoom first-stage fraction", 0.45F));
-    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprwinview:animation_workspace_zoom_gap", "overview workspace_zoom panel gap", 18));
+    addConfigValue(
+        makeShared<Config::Values::CIntValue>("plugin:hyprwinview:gap_size", "gap size", 24));
+    addConfigValue(
+        makeShared<Config::Values::CIntValue>("plugin:hyprwinview:margin", "margin", 48));
+    addConfigValue(makeShared<Config::Values::CColorValue>("plugin:hyprwinview:background",
+                                                           "background color", 0x99101014));
+    addConfigValue(makeShared<Config::Values::CIntValue>(
+        "plugin:hyprwinview:background_blur", "blur the background behind the overview", 0));
+    addConfigValue(makeShared<Config::Values::CColorValue>(
+        "plugin:hyprwinview:bg_col", "legacy background color alias", 0x99101014));
+    addConfigValue(makeShared<Config::Values::CColorValue>("plugin:hyprwinview:border_col",
+                                                           "border color", 0x33FFFFFF));
+    addConfigValue(makeShared<Config::Values::CColorValue>("plugin:hyprwinview:hover_border_col",
+                                                           "hover border color", 0xEE66CCFF));
+    addConfigValue(
+        makeShared<Config::Values::CIntValue>("plugin:hyprwinview:border_size", "border size", 3));
+    addConfigValue(makeShared<Config::Values::CStringValue>(
+        "plugin:hyprwinview:window_order", "overview window ordering strategy", "natural"));
+    addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprwinview:keys_left",
+                                                            "left keys", "a,h,left"));
+    addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprwinview:keys_right",
+                                                            "right keys", "d,l,right"));
+    addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprwinview:keys_up", "up keys",
+                                                            "w,k,up"));
+    addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprwinview:keys_down",
+                                                            "down keys", "s,j,down"));
+    addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprwinview:keys_go", "go keys",
+                                                            "return,enter,space,g,f"));
+    addConfigValue(makeShared<Config::Values::CStringValue>(
+        "plugin:hyprwinview:keys_bring", "bring keys", "b,shift+return,shift+space"));
+    addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprwinview:keys_bring_replace",
+                                                            "bring replace keys", "shift+b"));
+    addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprwinview:keys_close",
+                                                            "close keys", "escape,q"));
+    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprwinview:show_app_icon",
+                                                         "show app icon overlays", 0));
+    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprwinview:app_icon_size",
+                                                         "app icon size", 48));
+    addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprwinview:app_icon_theme",
+                                                            "app icon theme override", ""));
+    addConfigValue(makeShared<Config::Values::CStringValue>(
+        "plugin:hyprwinview:app_icon_theme_source", "app icon theme source", "auto"));
+    addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprwinview:app_icon_overrides",
+                                                            "app icon app_id=icon overrides", ""));
+    addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprwinview:app_icon_position",
+                                                            "app icon position", "bottom right"));
+    addConfigValue(makeShared<Config::Values::CFloatValue>(
+        "plugin:hyprwinview:app_icon_anchor_x", "app icon normalized x anchor override", -1.0F));
+    addConfigValue(makeShared<Config::Values::CFloatValue>(
+        "plugin:hyprwinview:app_icon_anchor_y", "app icon normalized y anchor override", -1.0F));
+    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprwinview:app_icon_margin_x",
+                                                         "app icon horizontal margin", 10));
+    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprwinview:app_icon_margin_y",
+                                                         "app icon vertical margin", 10));
+    addConfigValue(
+        makeShared<Config::Values::CFloatValue>("plugin:hyprwinview:app_icon_margin_relative_x",
+                                                "app icon relative horizontal margin", 0.0F));
+    addConfigValue(
+        makeShared<Config::Values::CFloatValue>("plugin:hyprwinview:app_icon_margin_relative_y",
+                                                "app icon relative vertical margin", 0.0F));
+    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprwinview:app_icon_offset_x",
+                                                         "app icon horizontal offset", 0));
+    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprwinview:app_icon_offset_y",
+                                                         "app icon vertical offset", 0));
+    addConfigValue(makeShared<Config::Values::CColorValue>(
+        "plugin:hyprwinview:app_icon_backplate_col", "app icon backplate color", 0x66000000));
+    addConfigValue(makeShared<Config::Values::CIntValue>(
+        "plugin:hyprwinview:app_icon_backplate_padding", "app icon backplate padding", 6));
+    addConfigValue(makeShared<Config::Values::CStringValue>(
+        "plugin:hyprwinview:animation", "overview animation mode", "workspace_zoom"));
+    addConfigValue(makeShared<Config::Values::CIntValue>(
+        "plugin:hyprwinview:animation_in_ms", "overview open animation duration in milliseconds",
+        280));
+    addConfigValue(makeShared<Config::Values::CIntValue>(
+        "plugin:hyprwinview:animation_out_ms", "overview close animation duration in milliseconds",
+        220));
+    addConfigValue(makeShared<Config::Values::CFloatValue>(
+        "plugin:hyprwinview:animation_speed", "overview animation speed multiplier", 1.0F));
+    addConfigValue(makeShared<Config::Values::CFloatValue>(
+        "plugin:hyprwinview:animation_scale", "overview fade_scale starting scale", 0.94F));
+    addConfigValue(makeShared<Config::Values::CIntValue>(
+        "plugin:hyprwinview:animation_stagger_ms",
+        "overview staggered animation delay between tiles in milliseconds", 16));
+    addConfigValue(makeShared<Config::Values::CIntValue>(
+        "plugin:hyprwinview:animation_stagger_max_ms",
+        "overview staggered animation maximum tile delay in milliseconds", 120));
+    addConfigValue(makeShared<Config::Values::CFloatValue>(
+        "plugin:hyprwinview:animation_workspace_zoom_stage_ratio",
+        "overview workspace_zoom first-stage fraction", 0.45F));
+    addConfigValue(
+        makeShared<Config::Values::CIntValue>("plugin:hyprwinview:animation_workspace_zoom_gap",
+                                              "overview workspace_zoom panel gap", 18));
 
     static auto renderStage = Event::bus()->m_events.render.stage.listen([](eRenderStage stage) {
         if (stage != RENDER_LAST_MOMENT || !g_pWindowOverview)
@@ -346,7 +410,8 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     HyprlandAPI::addLuaFunction(PHANDLE, "hyprwinview", "configure", ::luaWinviewConfigure);
     HyprlandAPI::reloadConfig();
 
-    HyprlandAPI::addNotification(PHANDLE, "[hyprwinview] Initialized successfully", CHyprColor{0.2, 1.0, 0.2, 1.0}, 5000);
+    HyprlandAPI::addNotification(PHANDLE, "[hyprwinview] Initialized successfully",
+                                 CHyprColor{0.2, 1.0, 0.2, 1.0}, 5000);
     return {"hyprwinview", "A window overview plugin for Hyprland", "Ivan Malison", "0.1.0"};
 }
 

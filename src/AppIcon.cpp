@@ -86,17 +86,19 @@ namespace {
         return VALUE;
     }
 
-    std::string configStringOr(const CConfigValue<Config::STRING>& value, const std::string& fallback) {
+    std::string configStringOr(const CConfigValue<Config::STRING>& value,
+                               const std::string&                  fallback) {
         try {
             return *value;
-        } catch (...) {
-            return fallback;
-        }
+        } catch (...) { return fallback; }
     }
 
     std::string trim(std::string value) {
-        const auto BEGIN = std::ranges::find_if_not(value, [](unsigned char c) { return std::isspace(c); });
-        const auto END   = std::find_if_not(value.rbegin(), value.rend(), [](unsigned char c) { return std::isspace(c); }).base();
+        const auto BEGIN =
+            std::ranges::find_if_not(value, [](unsigned char c) { return std::isspace(c); });
+        const auto END = std::find_if_not(value.rbegin(), value.rend(), [](unsigned char c) {
+                             return std::isspace(c);
+                         }).base();
 
         if (BEGIN >= END)
             return "";
@@ -105,7 +107,8 @@ namespace {
     }
 
     std::string lowercase(std::string value) {
-        std::ranges::transform(value, value.begin(), [](unsigned char c) { return std::tolower(c); });
+        std::ranges::transform(value, value.begin(),
+                               [](unsigned char c) { return std::tolower(c); });
         return value;
     }
 
@@ -130,7 +133,8 @@ namespace {
         } catch (...) { return fallback; }
     }
 
-    std::vector<std::string> splitEnvPaths(const char* value, const std::vector<std::string>& defaults) {
+    std::vector<std::string> splitEnvPaths(const char*                     value,
+                                           const std::vector<std::string>& defaults) {
         if (!value || std::string_view(value).empty())
             return defaults;
 
@@ -165,7 +169,8 @@ namespace {
         else if (HOME && *HOME)
             dirs.emplace_back(fs::path(HOME) / ".local/share");
 
-        for (const auto& path : splitEnvPaths(std::getenv("XDG_DATA_DIRS"), {"/usr/local/share", "/usr/share"}))
+        for (const auto& path :
+             splitEnvPaths(std::getenv("XDG_DATA_DIRS"), {"/usr/local/share", "/usr/share"}))
             dirs.emplace_back(path);
 
         return dirs;
@@ -232,7 +237,8 @@ namespace {
         return data;
     }
 
-    std::optional<std::string> iniValue(const fs::path& path, const std::string& section, const std::string& key) {
+    std::optional<std::string> iniValue(const fs::path& path, const std::string& section,
+                                        const std::string& key) {
         const auto DATA    = parseIniFile(path);
         const auto SECTION = DATA.find(section);
         if (SECTION == DATA.end())
@@ -257,7 +263,9 @@ namespace {
                 continue;
 
             auto value = trim(line.substr(std::string_view("Net/IconThemeName").size()));
-            if (value.size() >= 2 && ((value.front() == '"' && value.back() == '"') || (value.front() == '\'' && value.back() == '\'')))
+            if (value.size() >= 2 &&
+                ((value.front() == '"' && value.back() == '"') ||
+                 (value.front() == '\'' && value.back() == '\'')))
                 value = value.substr(1, value.size() - 2);
 
             if (!value.empty())
@@ -323,7 +331,10 @@ namespace {
             if (!fs::exists(APPDIR, ec))
                 continue;
 
-            for (fs::recursive_directory_iterator it(APPDIR, fs::directory_options::skip_permission_denied, ec), end; it != end; it.increment(ec)) {
+            for (fs::recursive_directory_iterator
+                     it(APPDIR, fs::directory_options::skip_permission_denied, ec),
+                 end;
+                 it != end; it.increment(ec)) {
                 if (ec || !it->is_regular_file(ec) || it->path().extension() != ".desktop")
                     continue;
 
@@ -419,9 +430,15 @@ namespace {
             const auto X    = PART.find('x');
             if (X != std::string::npos) {
                 const auto SCALE_MARKER = PART.find('@', X + 1);
-                const int  SIZE =
-                    std::max(parseInt(PART.substr(0, X), 0), parseInt(PART.substr(X + 1, SCALE_MARKER == std::string::npos ? std::string::npos : SCALE_MARKER - X - 1), 0));
-                const int SCALE = SCALE_MARKER == std::string::npos ? 1 : parseInt(PART.substr(SCALE_MARKER + 1), 1);
+                const int  SIZE         = std::max(
+                    parseInt(PART.substr(0, X), 0),
+                    parseInt(PART.substr(X + 1,
+                                         SCALE_MARKER == std::string::npos ? std::string::npos :
+                                                                                      SCALE_MARKER - X - 1),
+                                      0));
+                const int SCALE = SCALE_MARKER == std::string::npos ?
+                    1 :
+                    parseInt(PART.substr(SCALE_MARKER + 1), 1);
                 return SIZE * std::max(1, SCALE);
             }
 
@@ -438,7 +455,8 @@ namespace {
         const bool SVG        = EXT == ".svg";
         const bool UNDERSIZED = !scalable && nominalSize > 0 && nominalSize < sizePx;
 
-        return (UNDERSIZED ? UNDERSIZED_RASTER_PENALTY : 0) + (SVG ? 0 : 10) + (nominalSize >= sizePx ? 0 : 50);
+        return (UNDERSIZED ? UNDERSIZED_RASTER_PENALTY : 0) + (SVG ? 0 : 10) +
+            (nominalSize >= sizePx ? 0 : 50);
     }
 
     std::optional<SIconTheme> loadIconTheme(const std::string& themeName) {
@@ -482,21 +500,27 @@ namespace {
 
                         SIconThemeDirectory dir;
                         dir.name = dirName;
-                        if (const auto SIZE = DIR_SECTION->second.find("Size"); SIZE != DIR_SECTION->second.end())
+                        if (const auto SIZE = DIR_SECTION->second.find("Size");
+                            SIZE != DIR_SECTION->second.end())
                             dir.size = parseInt(SIZE->second, 0);
-                        if (const auto SCALE = DIR_SECTION->second.find("Scale"); SCALE != DIR_SECTION->second.end())
+                        if (const auto SCALE = DIR_SECTION->second.find("Scale");
+                            SCALE != DIR_SECTION->second.end())
                             dir.scale = std::max(1, parseInt(SCALE->second, 1));
-                        if (const auto TYPE = DIR_SECTION->second.find("Type"); TYPE != DIR_SECTION->second.end())
+                        if (const auto TYPE = DIR_SECTION->second.find("Type");
+                            TYPE != DIR_SECTION->second.end())
                             dir.type = TYPE->second;
-                        if (const auto MIN = DIR_SECTION->second.find("MinSize"); MIN != DIR_SECTION->second.end())
+                        if (const auto MIN = DIR_SECTION->second.find("MinSize");
+                            MIN != DIR_SECTION->second.end())
                             dir.minSize = parseInt(MIN->second, dir.size);
                         else
                             dir.minSize = dir.size;
-                        if (const auto MAX = DIR_SECTION->second.find("MaxSize"); MAX != DIR_SECTION->second.end())
+                        if (const auto MAX = DIR_SECTION->second.find("MaxSize");
+                            MAX != DIR_SECTION->second.end())
                             dir.maxSize = parseInt(MAX->second, dir.size);
                         else
                             dir.maxSize = dir.size;
-                        if (const auto THRESHOLD = DIR_SECTION->second.find("Threshold"); THRESHOLD != DIR_SECTION->second.end())
+                        if (const auto THRESHOLD = DIR_SECTION->second.find("Threshold");
+                            THRESHOLD != DIR_SECTION->second.end())
                             dir.threshold = parseInt(THRESHOLD->second, 2);
 
                         if (iconDirectoryNominalSize(dir) > 0 || lowercase(dir.type) == "scalable")
@@ -510,7 +534,9 @@ namespace {
         return theme;
     }
 
-    std::optional<fs::path> findIconInTheme(const std::string& iconName, const std::string& themeName, int sizePx, std::unordered_set<std::string>& visited) {
+    std::optional<fs::path> findIconInTheme(const std::string& iconName,
+                                            const std::string& themeName, int sizePx,
+                                            std::unordered_set<std::string>& visited) {
         const auto VISIT_KEY = themeName;
         if (VISIT_KEY.empty() || visited.contains(VISIT_KEY))
             return std::nullopt;
@@ -535,7 +561,8 @@ namespace {
                     if (!fs::is_regular_file(PATH, ec))
                         continue;
 
-                    const int SCORE = DISTANCE * 1000 + iconFileTieBreakScore(PATH, NOMINAL, sizePx, SCALABLE);
+                    const int SCORE =
+                        DISTANCE * 1000 + iconFileTieBreakScore(PATH, NOMINAL, sizePx, SCALABLE);
                     if (SCORE < bestScore) {
                         bestScore = SCORE;
                         bestPath  = PATH;
@@ -572,7 +599,8 @@ namespace {
                 return value;
         }
 
-        for (const auto& path : {CONFIG_HOME / "gtk-4.0/settings.ini", CONFIG_HOME / "gtk-3.0/settings.ini"}) {
+        for (const auto& path :
+             {CONFIG_HOME / "gtk-4.0/settings.ini", CONFIG_HOME / "gtk-3.0/settings.ini"}) {
             if (auto value = iniValue(path, "Settings", "gtk-icon-theme-name"))
                 return value;
         }
@@ -585,14 +613,18 @@ namespace {
         if (CONFIG_HOME.empty())
             return std::nullopt;
 
-        const std::string     PLATFORM_THEME = lowercase(std::getenv("QT_QPA_PLATFORMTHEME") ? std::getenv("QT_QPA_PLATFORMTHEME") : "");
+        const auto        QT_PLATFORM_THEME = std::getenv("QT_QPA_PLATFORMTHEME");
+        const std::string PLATFORM_THEME    = lowercase(QT_PLATFORM_THEME ? QT_PLATFORM_THEME : "");
         std::vector<fs::path> paths;
         if (PLATFORM_THEME.contains("qt6ct"))
-            paths = {CONFIG_HOME / "qt6ct/qt6ct.conf", CONFIG_HOME / "qt5ct/qt5ct.conf", CONFIG_HOME / "kdeglobals"};
+            paths = {CONFIG_HOME / "qt6ct/qt6ct.conf", CONFIG_HOME / "qt5ct/qt5ct.conf",
+                     CONFIG_HOME / "kdeglobals"};
         else if (PLATFORM_THEME.contains("qt5ct"))
-            paths = {CONFIG_HOME / "qt5ct/qt5ct.conf", CONFIG_HOME / "qt6ct/qt6ct.conf", CONFIG_HOME / "kdeglobals"};
+            paths = {CONFIG_HOME / "qt5ct/qt5ct.conf", CONFIG_HOME / "qt6ct/qt6ct.conf",
+                     CONFIG_HOME / "kdeglobals"};
         else
-            paths = {CONFIG_HOME / "kdeglobals", CONFIG_HOME / "qt6ct/qt6ct.conf", CONFIG_HOME / "qt5ct/qt5ct.conf"};
+            paths = {CONFIG_HOME / "kdeglobals", CONFIG_HOME / "qt6ct/qt6ct.conf",
+                     CONFIG_HOME / "qt5ct/qt5ct.conf"};
 
         for (const auto& path : paths) {
             if (path.filename() == "kdeglobals") {
@@ -609,7 +641,9 @@ namespace {
         if (!value || value->empty())
             return;
 
-        if (std::ranges::find_if(values, [&](const auto& existing) { return lowercase(existing) == lowercase(*value); }) == values.end())
+        if (std::ranges::find_if(values, [&](const auto& existing) {
+                return lowercase(existing) == lowercase(*value);
+            }) == values.end())
             values.push_back(*value);
     }
 
@@ -642,9 +676,12 @@ namespace {
             return themes;
         }
 
-        const std::string CURRENT_DESKTOP = lowercase(std::getenv("XDG_CURRENT_DESKTOP") ? std::getenv("XDG_CURRENT_DESKTOP") : "");
-        const std::string PLATFORM_THEME  = lowercase(std::getenv("QT_QPA_PLATFORMTHEME") ? std::getenv("QT_QPA_PLATFORMTHEME") : "");
-        const bool        QT_FIRST        = CURRENT_DESKTOP.contains("kde") || CURRENT_DESKTOP.contains("lxqt") || PLATFORM_THEME.contains("qt") || PLATFORM_THEME.contains("kde");
+        const std::string CURRENT_DESKTOP =
+            lowercase(std::getenv("XDG_CURRENT_DESKTOP") ? std::getenv("XDG_CURRENT_DESKTOP") : "");
+        const std::string PLATFORM_THEME = lowercase(
+            std::getenv("QT_QPA_PLATFORMTHEME") ? std::getenv("QT_QPA_PLATFORMTHEME") : "");
+        const bool QT_FIRST = CURRENT_DESKTOP.contains("kde") || CURRENT_DESKTOP.contains("lxqt") ||
+            PLATFORM_THEME.contains("qt") || PLATFORM_THEME.contains("kde");
 
         if (QT_FIRST) {
             appendUnique(themes, qtIconThemeName());
@@ -668,7 +705,8 @@ namespace {
         return key;
     }
 
-    std::optional<fs::path> findIconByTheme(const std::string& iconName, int sizePx, const std::vector<std::string>& themes) {
+    std::optional<fs::path> findIconByTheme(const std::string& iconName, int sizePx,
+                                            const std::vector<std::string>& themes) {
         const auto LOOKUP_NAME = iconLookupName(iconName);
         for (const auto& themeName : themes) {
             std::unordered_set<std::string> visited;
@@ -690,13 +728,19 @@ namespace {
             if (!fs::exists(root, ec))
                 continue;
 
-            for (fs::recursive_directory_iterator it(root, fs::directory_options::skip_permission_denied, ec), end; it != end; it.increment(ec)) {
-                if (ec || !it->is_regular_file(ec) || it->path().stem() != LOOKUP_NAME || !hasImageExtension(it->path()))
+            for (fs::recursive_directory_iterator
+                     it(root, fs::directory_options::skip_permission_denied, ec),
+                 end;
+                 it != end; it.increment(ec)) {
+                if (ec || !it->is_regular_file(ec) || it->path().stem() != LOOKUP_NAME ||
+                    !hasImageExtension(it->path()))
                     continue;
 
                 const int NOMINAL  = fallbackSizeFromPath(it->path());
                 const int DISTANCE = NOMINAL > 0 ? std::abs(NOMINAL - sizePx) : sizePx;
-                const int SCORE    = DISTANCE * 1000 + iconFileTieBreakScore(it->path(), NOMINAL, sizePx, lowercase(it->path().extension().string()) == ".svg");
+                const int SCORE    = DISTANCE * 1000 +
+                    iconFileTieBreakScore(it->path(), NOMINAL, sizePx,
+                                          lowercase(it->path().extension().string()) == ".svg");
                 if (SCORE < bestScore) {
                     bestScore = SCORE;
                     bestPath  = it->path();
@@ -712,8 +756,9 @@ namespace {
             return std::nullopt;
 
         const auto THEMES    = configuredThemeNames();
-        const auto CACHE_KEY = iconName + ":" + std::to_string(sizePx) + ":" + configStringOr(PAPPICONTHEME(), "") + ":" + configStringOr(PAPPICONTHEMESOURCE(), "auto") + ":" +
-            themeCacheKeyPart(THEMES);
+        const auto CACHE_KEY = iconName + ":" + std::to_string(sizePx) + ":" +
+            configStringOr(PAPPICONTHEME(), "") + ":" +
+            configStringOr(PAPPICONTHEMESOURCE(), "auto") + ":" + themeCacheKeyPart(THEMES);
         if (const auto IT = g_iconPathCache.find(CACHE_KEY); IT != g_iconPathCache.end())
             return IT->second;
 
@@ -724,8 +769,10 @@ namespace {
             return ICON.string();
         }
 
-        const auto THEME_RESULT = themeLookupDisabled() ? std::optional<fs::path>{} : findIconByTheme(iconName, sizePx, THEMES);
-        const auto RESULT       = THEME_RESULT ? std::optional<std::string>{THEME_RESULT->string()} : findIconByLegacySearch(iconName, sizePx);
+        const auto THEME_RESULT = themeLookupDisabled() ? std::optional<fs::path>{} :
+                                                          findIconByTheme(iconName, sizePx, THEMES);
+        const auto RESULT = THEME_RESULT ? std::optional<std::string>{THEME_RESULT->string()} :
+                                           findIconByLegacySearch(iconName, sizePx);
         g_iconPathCache.emplace(CACHE_KEY, RESULT);
         return RESULT;
     }
@@ -746,7 +793,8 @@ namespace {
         cairo_paint(cr);
         cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
 
-        const double SCALE = std::min(sizePx / std::max(1.0, (double)SOURCE_W), sizePx / std::max(1.0, (double)SOURCE_H));
+        const double SCALE = std::min(sizePx / std::max(1.0, (double)SOURCE_W),
+                                      sizePx / std::max(1.0, (double)SOURCE_H));
         cairo_translate(cr, (sizePx - SOURCE_W * SCALE) / 2.0, (sizePx - SOURCE_H * SCALE) / 2.0);
         cairo_scale(cr, SCALE, SCALE);
         cairo_set_source_surface(cr, source, 0, 0);
@@ -793,8 +841,9 @@ namespace {
         if (const auto IT = g_textureCache.find(CACHE_KEY); IT != g_textureCache.end())
             return IT->second.texture;
 
-        const auto       EXT     = lowercase(fs::path(path).extension().string());
-        cairo_surface_t* surface = EXT == ".svg" ? renderSvg(path, sizePx) : renderPng(path, sizePx);
+        const auto       EXT = lowercase(fs::path(path).extension().string());
+        cairo_surface_t* surface =
+            EXT == ".svg" ? renderSvg(path, sizePx) : renderPng(path, sizePx);
         if (!surface)
             return nullptr;
 
@@ -802,7 +851,8 @@ namespace {
         cairo_surface_destroy(surface);
 
         if (texture)
-            g_textureCache.emplace(CACHE_KEY, STextureCacheEntry{.texture = texture, .path = path, .sizePx = sizePx});
+            g_textureCache.emplace(
+                CACHE_KEY, STextureCacheEntry{.texture = texture, .path = path, .sizePx = sizePx});
 
         return texture;
     }
