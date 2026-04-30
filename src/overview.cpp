@@ -3,8 +3,10 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <optional>
 #include <sstream>
 #include <string>
+#include <utility>
 
 #define private public
 #define protected public
@@ -156,6 +158,24 @@ static const CConfigValue<Config::INTEGER>& PAPPICONBACKPLATEPADDING() {
     return VALUE;
 }
 
+static std::optional<SWinviewKeyConfig> g_winviewKeyConfigOverride;
+
+SWinviewKeyConfig defaultWinviewKeyConfig() {
+    return {
+        .left  = {"a", "h", "left"},
+        .right = {"d", "l", "right"},
+        .up    = {"w", "k", "up"},
+        .down  = {"s", "j", "down"},
+        .go    = {"return", "enter", "space", "g"},
+        .bring = {"b", "shift+return", "shift+space"},
+        .close = {"escape", "q"},
+    };
+}
+
+void setWinviewKeyConfig(SWinviewKeyConfig config) {
+    g_winviewKeyConfigOverride = std::move(config);
+}
+
 static uint32_t framebufferFormatWithAlpha(uint32_t drmFormat) {
     return DRM_FORMAT_ABGR8888;
 }
@@ -246,13 +266,29 @@ static bool tokenMatchesKey(const std::string& token, xkb_keysym_t keysym, uint3
     return requiredKey != XKB_KEY_NoSymbol && xkb_keysym_to_lower(requiredKey) == xkb_keysym_to_lower(keysym) && (mods & requiredMods) == requiredMods;
 }
 
-static bool matchesKeySet(const CConfigValue<Config::STRING>& keys, xkb_keysym_t keysym, uint32_t mods) {
-    for (const auto& token : keyTokens(*keys)) {
+static bool matchesKeySet(const std::vector<std::string>& keys, xkb_keysym_t keysym, uint32_t mods) {
+    for (const auto& token : keys) {
         if (tokenMatchesKey(token, keysym, mods))
             return true;
     }
 
     return false;
+}
+
+static SWinviewKeyConfig keyConfigFromConfigValues() {
+    return {
+        .left  = keyTokens(*PKEYSLEFT()),
+        .right = keyTokens(*PKEYSRIGHT()),
+        .up    = keyTokens(*PKEYSUP()),
+        .down  = keyTokens(*PKEYSDOWN()),
+        .go    = keyTokens(*PKEYSGO()),
+        .bring = keyTokens(*PKEYSBRING()),
+        .close = keyTokens(*PKEYSCLOSE()),
+    };
+}
+
+static SWinviewKeyConfig activeKeyConfig() {
+    return g_winviewKeyConfigOverride.value_or(keyConfigFromConfigValues());
 }
 
 static std::string lower(std::string value) {
@@ -579,9 +615,10 @@ bool CWindowOverview::handleKey(const IKeyboard::SKeyEvent& event) {
     const auto KEYCODE = event.keycode + 8;
     const auto KEYSYM  = xkb_state_key_get_one_sym(KEYBOARD->m_xkbState, KEYCODE);
     const auto MODS    = g_pInputManager->getModsFromAllKBs();
+    const auto KEYS    = activeKeyConfig();
 
-    const bool RECOGNIZED = matchesKeySet(PKEYSLEFT(), KEYSYM, MODS) || matchesKeySet(PKEYSRIGHT(), KEYSYM, MODS) || matchesKeySet(PKEYSUP(), KEYSYM, MODS) ||
-        matchesKeySet(PKEYSDOWN(), KEYSYM, MODS) || matchesKeySet(PKEYSGO(), KEYSYM, MODS) || matchesKeySet(PKEYSBRING(), KEYSYM, MODS) || matchesKeySet(PKEYSCLOSE(), KEYSYM, MODS);
+    const bool RECOGNIZED = matchesKeySet(KEYS.left, KEYSYM, MODS) || matchesKeySet(KEYS.right, KEYSYM, MODS) || matchesKeySet(KEYS.up, KEYSYM, MODS) ||
+        matchesKeySet(KEYS.down, KEYSYM, MODS) || matchesKeySet(KEYS.go, KEYSYM, MODS) || matchesKeySet(KEYS.bring, KEYSYM, MODS) || matchesKeySet(KEYS.close, KEYSYM, MODS);
 
     if (!RECOGNIZED)
         return false;
@@ -589,19 +626,19 @@ bool CWindowOverview::handleKey(const IKeyboard::SKeyEvent& event) {
     if (event.state != WL_KEYBOARD_KEY_STATE_PRESSED)
         return true;
 
-    if (matchesKeySet(PKEYSLEFT(), KEYSYM, MODS))
+    if (matchesKeySet(KEYS.left, KEYSYM, MODS))
         moveSelection(-1, 0);
-    else if (matchesKeySet(PKEYSRIGHT(), KEYSYM, MODS))
+    else if (matchesKeySet(KEYS.right, KEYSYM, MODS))
         moveSelection(1, 0);
-    else if (matchesKeySet(PKEYSUP(), KEYSYM, MODS))
+    else if (matchesKeySet(KEYS.up, KEYSYM, MODS))
         moveSelection(0, -1);
-    else if (matchesKeySet(PKEYSDOWN(), KEYSYM, MODS))
+    else if (matchesKeySet(KEYS.down, KEYSYM, MODS))
         moveSelection(0, 1);
-    else if (matchesKeySet(PKEYSBRING(), KEYSYM, MODS))
+    else if (matchesKeySet(KEYS.bring, KEYSYM, MODS))
         runSelected(true);
-    else if (matchesKeySet(PKEYSGO(), KEYSYM, MODS))
+    else if (matchesKeySet(KEYS.go, KEYSYM, MODS))
         runSelected(false);
-    else if (matchesKeySet(PKEYSCLOSE(), KEYSYM, MODS))
+    else if (matchesKeySet(KEYS.close, KEYSYM, MODS))
         close(false);
 
     return true;

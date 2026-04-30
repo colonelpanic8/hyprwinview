@@ -58,13 +58,6 @@ hl.config({
             border_col = "rgba(ffffff33)",
             hover_border_col = "rgba(66ccffee)",
             border_size = 3,
-            keys_left = "a,h,left",
-            keys_right = "d,l,right",
-            keys_up = "w,k,up",
-            keys_down = "s,j,down",
-            keys_go = "return,enter,space,g",
-            keys_bring = "b,shift+return,shift+space",
-            keys_close = "escape,q",
             show_app_icon = 1,
             app_icon_size = 48,
             app_icon_theme = "",
@@ -84,10 +77,24 @@ hl.config({
         },
     },
 })
+
+hl.plugin.hyprwinview.configure({
+    keys = {
+        left = { "a", "h", "left" },
+        right = { "d", "l", "right" },
+        up = { "w", "k", "up" },
+        down = { "s", "j", "down" },
+        go = { "return", "enter", "space", "g" },
+        bring = { "b", "shift+return", "shift+space" },
+        close = { "escape", "q" },
+    },
+})
 ```
 
-Keyboard key sets are comma-separated. Modifiers can be written with `+`, for
-example `shift+return`.
+Keyboard key sets are Lua arrays when configuring through
+`hl.plugin.hyprwinview.configure`. Modifiers can be written with `+`, for
+example `shift+return`. The scalar `keys_*` plugin options still work as a
+fallback for hyprlang-style configuration.
 
 `app_icon_position` accepts `left`, `right`, `top`, `bottom`, and `center`,
 including combinations like `top left` or `bottom right`; single edges like

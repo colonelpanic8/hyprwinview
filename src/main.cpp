@@ -14,6 +14,8 @@
 
 #include <lua.hpp>
 
+#include <utility>
+
 #include "AppIcon.hpp"
 #include "globals.hpp"
 #include "overview.hpp"
@@ -82,6 +84,71 @@ static int luaWinviewOverview(lua_State* L) {
     return 0;
 }
 
+static std::vector<std::string> luaStringListField(lua_State* L, int tableIdx, const char* field, const std::vector<std::string>& fallback) {
+    tableIdx = lua_absindex(L, tableIdx);
+    lua_getfield(L, tableIdx, field);
+
+    if (lua_isnil(L, -1)) {
+        lua_pop(L, 1);
+        return fallback;
+    }
+
+    if (!lua_istable(L, -1))
+        luaL_error(L, "hyprwinview.configure: field \"%s\" must be an array of strings", field);
+
+    std::vector<std::string> result;
+    const auto               LEN = lua_rawlen(L, -1);
+    result.reserve(LEN);
+
+    for (size_t i = 1; i <= LEN; ++i) {
+        lua_rawgeti(L, -1, i);
+        if (!lua_isstring(L, -1))
+            luaL_error(L, "hyprwinview.configure: field \"%s\" item %zu must be a string", field, i);
+        result.emplace_back(lua_tostring(L, -1));
+        lua_pop(L, 1);
+    }
+
+    lua_pop(L, 1);
+    return result;
+}
+
+static void readKeyTable(lua_State* L, int tableIdx, SWinviewKeyConfig& config) {
+    config.left  = luaStringListField(L, tableIdx, "left", config.left);
+    config.right = luaStringListField(L, tableIdx, "right", config.right);
+    config.up    = luaStringListField(L, tableIdx, "up", config.up);
+    config.down  = luaStringListField(L, tableIdx, "down", config.down);
+    config.go    = luaStringListField(L, tableIdx, "go", config.go);
+    config.bring = luaStringListField(L, tableIdx, "bring", config.bring);
+    config.close = luaStringListField(L, tableIdx, "close", config.close);
+
+    config.left  = luaStringListField(L, tableIdx, "keys_left", config.left);
+    config.right = luaStringListField(L, tableIdx, "keys_right", config.right);
+    config.up    = luaStringListField(L, tableIdx, "keys_up", config.up);
+    config.down  = luaStringListField(L, tableIdx, "keys_down", config.down);
+    config.go    = luaStringListField(L, tableIdx, "keys_go", config.go);
+    config.bring = luaStringListField(L, tableIdx, "keys_bring", config.bring);
+    config.close = luaStringListField(L, tableIdx, "keys_close", config.close);
+}
+
+static int luaWinviewConfigure(lua_State* L) {
+    luaL_checktype(L, 1, LUA_TTABLE);
+
+    auto config = defaultWinviewKeyConfig();
+
+    readKeyTable(L, 1, config);
+
+    lua_getfield(L, 1, "keys");
+    if (!lua_isnil(L, -1)) {
+        if (!lua_istable(L, -1))
+            return luaL_error(L, "hyprwinview.configure: field \"keys\" must be a table");
+        readKeyTable(L, -1, config);
+    }
+    lua_pop(L, 1);
+
+    setWinviewKeyConfig(std::move(config));
+    return 0;
+}
+
 APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     PHANDLE = handle;
 
@@ -134,6 +201,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
 
     HyprlandAPI::addDispatcherV2(PHANDLE, "hyprwinview:overview", ::onWinviewDispatcher);
     HyprlandAPI::addLuaFunction(PHANDLE, "hyprwinview", "overview", ::luaWinviewOverview);
+    HyprlandAPI::addLuaFunction(PHANDLE, "hyprwinview", "configure", ::luaWinviewConfigure);
     HyprlandAPI::reloadConfig();
 
     HyprlandAPI::addNotification(PHANDLE, "[hyprwinview] Initialized successfully", CHyprColor{0.2, 1.0, 0.2, 1.0}, 5000);

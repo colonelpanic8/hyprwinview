@@ -5,7 +5,21 @@
 #include <hyprland/src/desktop/DesktopTypes.hpp>
 #include <hyprland/src/event/EventBus.hpp>
 #include <hyprland/src/render/Framebuffer.hpp>
+#include <string>
 #include <vector>
+
+struct SWinviewKeyConfig {
+    std::vector<std::string> left;
+    std::vector<std::string> right;
+    std::vector<std::string> up;
+    std::vector<std::string> down;
+    std::vector<std::string> go;
+    std::vector<std::string> bring;
+    std::vector<std::string> close;
+};
+
+SWinviewKeyConfig defaultWinviewKeyConfig();
+void              setWinviewKeyConfig(SWinviewKeyConfig config);
 
 class CWindowOverview {
   public:
