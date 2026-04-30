@@ -465,6 +465,14 @@ static double workspaceZoomStageRatio() {
     return std::clamp<double>(*PANIMATIONWORKSPACEZOOMSTAGERATIO(), 0.1, 0.9);
 }
 
+static int workspaceGridColsForCount(int count) {
+    return std::max(1, (int)std::ceil(std::sqrt(std::max(1, count))));
+}
+
+static int workspaceGridRowsForCount(int count, int cols) {
+    return std::max(1, (int)std::ceil((double)std::max(1, count) / std::max(1, cols)));
+}
+
 static double animationDurationMs(bool closing) {
     const double SPEED = std::clamp<double>(*PANIMATIONSPEED(), 0.1, 10.0);
     return std::max<Config::INTEGER>(0, closing ? *PANIMATIONOUTMS() : *PANIMATIONINMS()) / SPEED;
@@ -686,6 +694,7 @@ void CWindowOverview::collectWindows() {
 
     std::ranges::reverse(previews);
     applyWindowOrdering();
+    updateWorkspaceGrid();
 }
 
 void CWindowOverview::applyWindowOrdering() {
@@ -715,6 +724,28 @@ void CWindowOverview::applyWindowOrdering() {
 
         return a.orderOriginalIndex < b.orderOriginalIndex;
     });
+}
+
+void CWindowOverview::updateWorkspaceGrid() {
+    int workspaceCount = 1;
+
+    for (const auto& workspace : g_pCompositor->getWorkspacesCopy()) {
+        if (!workspace || workspace->m_isSpecialWorkspace || workspace->m_id <= 0)
+            continue;
+
+        workspaceCount = std::max(workspaceCount, (int)workspace->m_id);
+    }
+
+    for (const auto& preview : previews) {
+        if (!preview.window || !preview.window->m_workspace || preview.window->m_workspace->m_isSpecialWorkspace || preview.window->m_workspace->m_id <= 0)
+            continue;
+
+        workspaceCount = std::max(workspaceCount, (int)preview.window->m_workspace->m_id);
+    }
+
+    workspaceGridCount = workspaceCount;
+    workspaceGridCols  = workspaceGridColsForCount(workspaceGridCount);
+    workspaceGridRows  = workspaceGridRowsForCount(workspaceGridCount, workspaceGridCols);
 }
 
 void CWindowOverview::updateLayout() {
@@ -947,20 +978,31 @@ double CWindowOverview::maxTileAnimationDelayMs() const {
     return std::min<double>((previews.size() - 1) * STAGGER_MS, MAX_STAGGER_MS);
 }
 
+int CWindowOverview::workspacePanelIndexForWorkspace(PHLWORKSPACE workspace) const {
+    if (workspace && !workspace->m_isSpecialWorkspace && workspace->m_id > 0)
+        return std::clamp((int)workspace->m_id - 1, 0, std::max(0, workspaceGridCount - 1));
+
+    return std::clamp(workspaceGridCount / 2, 0, std::max(0, workspaceGridCount - 1));
+}
+
 CBox CWindowOverview::workspacePanelCellLogical(int index) const {
     if (!pMonitor)
         return {};
 
-    index = std::clamp(index, 0, 8);
+    const int count = std::max(1, workspaceGridCount);
+    const int cols  = std::max(1, workspaceGridCols);
+    const int rows  = std::max(1, workspaceGridRows);
+
+    index = std::clamp(index, 0, count - 1);
 
     const double margin = std::max<Config::INTEGER>(0, *PMARGIN());
     const double gap    = std::max<Config::INTEGER>(0, *PANIMATIONWORKSPACEZOOMGAP());
     const double areaW  = std::max(1.0, pMonitor->m_size.x - margin * 2.0);
     const double areaH  = std::max(1.0, pMonitor->m_size.y - margin * 2.0);
-    const double cellW  = std::max(1.0, (areaW - gap * 2.0) / 3.0);
-    const double cellH  = std::max(1.0, (areaH - gap * 2.0) / 3.0);
-    const int    col    = index % 3;
-    const int    row    = index / 3;
+    const double cellW  = std::max(1.0, (areaW - gap * (cols - 1)) / cols);
+    const double cellH  = std::max(1.0, (areaH - gap * (rows - 1)) / rows);
+    const int    col    = index % cols;
+    const int    row    = index / cols;
 
     return {margin + col * (cellW + gap), margin + row * (cellH + gap), cellW, cellH};
 }
@@ -973,15 +1015,7 @@ CBox CWindowOverview::workspacePanelBoxForPreview(const SWindowPreview& preview)
     if (!SOURCE_MONITOR)
         return preview.tileLogical;
 
-    int panelIndex = 4;
-    if (preview.window->m_workspace) {
-        const auto ANCHOR_WORKSPACE = initialFocusedWorkspace ? initialFocusedWorkspace : (pMonitor ? pMonitor->m_activeWorkspace : nullptr);
-        if (ANCHOR_WORKSPACE && preview.window->m_workspace->m_id > 0 && ANCHOR_WORKSPACE->m_id > 0) {
-            const auto RELATIVE_WORKSPACE = (int)(preview.window->m_workspace->m_id - ANCHOR_WORKSPACE->m_id);
-            panelIndex                    = std::clamp(RELATIVE_WORKSPACE + 4, 0, 8);
-        }
-    }
-
+    const auto panelIndex = workspacePanelIndexForWorkspace(preview.window->m_workspace);
     const auto CELL       = workspacePanelCellLogical(panelIndex);
     const auto WIN_POS    = preview.window->m_realPosition->value();
     const auto WIN_SIZE   = preview.window->m_realSize->value();
@@ -1004,14 +1038,15 @@ CBox CWindowOverview::workspaceZoomCameraBoxForPanelBox(const CBox& panelBox, do
     if (!pMonitor)
         return panelBox;
 
-    const auto CENTER_CELL = workspacePanelCellLogical(4);
-    const auto PROGRESS    = std::clamp(cameraProgress, 0.0, 1.0);
-    const auto VIEWPORT    = CBox{0, 0, pMonitor->m_size.x, pMonitor->m_size.y};
+    const auto   START_WORKSPACE = initialFocusedWorkspace ? initialFocusedWorkspace : (pMonitor ? pMonitor->m_activeWorkspace : nullptr);
+    const auto   START_CELL      = workspacePanelCellLogical(workspacePanelIndexForWorkspace(START_WORKSPACE));
+    const auto   PROGRESS        = std::clamp(cameraProgress, 0.0, 1.0);
+    const auto   VIEWPORT        = CBox{0, 0, pMonitor->m_size.x, pMonitor->m_size.y};
 
-    const double startScaleX = VIEWPORT.w / std::max(1.0, CENTER_CELL.w);
-    const double startScaleY = VIEWPORT.h / std::max(1.0, CENTER_CELL.h);
-    const double startX      = VIEWPORT.x - CENTER_CELL.x * startScaleX;
-    const double startY      = VIEWPORT.y - CENTER_CELL.y * startScaleY;
+    const double startScaleX = VIEWPORT.w / std::max(1.0, START_CELL.w);
+    const double startScaleY = VIEWPORT.h / std::max(1.0, START_CELL.h);
+    const double startX      = VIEWPORT.x - START_CELL.x * startScaleX;
+    const double startY      = VIEWPORT.y - START_CELL.y * startScaleY;
     const double scaleX      = lerpDouble(startScaleX, 1.0, PROGRESS);
     const double scaleY      = lerpDouble(startScaleY, 1.0, PROGRESS);
     const double x           = lerpDouble(startX, 0.0, PROGRESS);

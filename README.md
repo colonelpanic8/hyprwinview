@@ -142,13 +142,17 @@ name or an absolute path.
 `animation_scale` is the starting tile scale for scale-based modes; it is
 clamped between `0.01` and `1.0`. `animation_stagger_ms` and
 `animation_stagger_max_ms` control the per-tile delay for `staggered`.
-`workspace_zoom` treats windows as living in a 3x3 workspace plane centered on
-the initially focused workspace. It starts with the camera zoomed into that
-center workspace, zooms out to reveal the workspace plane, then moves and
-resizes windows into the final overview grid. `animation_workspace_zoom_stage_ratio`
-controls how much of the duration is spent reaching the workspace-plane view
-before moving to the final grid, and `animation_workspace_zoom_gap` controls the
-spacing between workspace cells in that intermediate plane.
+`workspace_zoom` treats windows as living in a fixed workspace grid. Workspace
+1 is placed in the first cell, workspace 2 in the second cell, and so on; nine
+normal workspaces therefore produce a 3x3 plane. Other workspace counts use a
+near-square grid sized from the highest normal workspace id Hyprland currently
+knows about. The animation starts with the camera zoomed into the initially
+focused workspace's fixed cell, zooms out to reveal the workspace plane, then
+moves and resizes windows into the final overview grid.
+`animation_workspace_zoom_stage_ratio` controls how much of the duration is
+spent reaching the workspace-plane view before moving to the final grid, and
+`animation_workspace_zoom_gap` controls the spacing between workspace cells in
+that intermediate plane.
 
 On Hyprland 0.54 and older hyprlang configs, the same options live under
 `plugin { hyprwinview { ... } }`.

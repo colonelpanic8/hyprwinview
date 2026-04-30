@@ -55,6 +55,7 @@ class CWindowOverview {
 
     void                  collectWindows();
     void                  applyWindowOrdering();
+    void                  updateWorkspaceGrid();
     void                  renderSnapshots();
     void                  updateLayout();
     int                   hoveredIndex() const;
@@ -67,6 +68,7 @@ class CWindowOverview {
     double                tileAnimationVisibleAmount(size_t index) const;
     double                tileAnimationDelayMs(size_t index) const;
     double                maxTileAnimationDelayMs() const;
+    int                   workspacePanelIndexForWorkspace(PHLWORKSPACE workspace) const;
     CBox                  workspacePanelCellLogical(int index) const;
     CBox                  workspacePanelBoxForPreview(const SWindowPreview& preview) const;
     CBox                  workspaceZoomCameraBoxForPanelBox(const CBox& panelBox, double cameraProgress) const;
@@ -81,6 +83,9 @@ class CWindowOverview {
     Vector2D                    lastMousePosLocal;
     int                         selectedIndex = -1;
     int                         gridCols      = 1;
+    int                         workspaceGridCols  = 1;
+    int                         workspaceGridRows  = 1;
+    int                         workspaceGridCount = 1;
     bool                        closing       = false;
     std::chrono::steady_clock::time_point animationStartedAt;
 
