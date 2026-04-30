@@ -7,6 +7,7 @@
 #include <hyprland/src/event/EventBus.hpp>
 #include <hyprland/src/render/Framebuffer.hpp>
 #include <string>
+#include <utility>
 #include <vector>
 
 struct SWinviewKeyConfig {
@@ -68,6 +69,8 @@ class CWindowOverview {
     double                tileAnimationVisibleAmount(size_t index) const;
     double                tileAnimationDelayMs(size_t index) const;
     double                maxTileAnimationDelayMs() const;
+    std::pair<int, int>   visualCellForPreviewIndex(int index) const;
+    int                   previewIndexForVisualCell(int row, int col) const;
     int                   workspacePanelIndexForWorkspace(PHLWORKSPACE workspace) const;
     CBox                  workspacePanelCellLogical(int index) const;
     CBox                  workspacePanelBoxForPreview(const SWindowPreview& preview) const;

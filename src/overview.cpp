@@ -781,8 +781,9 @@ void CWindowOverview::updateLayout() {
 
     for (size_t i = 0; i < previews.size(); ++i) {
         auto&        preview = previews[i];
-        const double col     = i % cols;
-        const double row     = i / cols;
+        const auto   cell    = visualCellForPreviewIndex((int)i);
+        const double row     = cell.first;
+        const double col     = cell.second;
         const auto   winSize = preview.window->m_realSize->value();
         const double scale   = std::min(cellW / std::max(1.0, winSize.x), cellH / std::max(1.0, winSize.y));
         const double w       = std::max(1.0, winSize.x * scale);
@@ -910,6 +911,30 @@ void CWindowOverview::selectHoveredWindow() {
     selectedIndex = hoveredIndex();
 }
 
+std::pair<int, int> CWindowOverview::visualCellForPreviewIndex(int index) const {
+    const int cols     = std::max(1, gridCols);
+    const int row      = index / cols;
+    const int colInRow = index % cols;
+    const int col      = row % 2 == 0 ? colInRow : cols - 1 - colInRow;
+
+    return {row, col};
+}
+
+int CWindowOverview::previewIndexForVisualCell(int row, int col) const {
+    const int cols = std::max(1, gridCols);
+
+    if (row < 0 || col < 0 || col >= cols)
+        return -1;
+
+    const int colInRow = row % 2 == 0 ? col : cols - 1 - col;
+    const int index    = row * cols + colInRow;
+
+    if (index < 0 || index >= (int)previews.size())
+        return -1;
+
+    return index;
+}
+
 void CWindowOverview::moveSelection(int dx, int dy) {
     if (previews.empty())
         return;
@@ -917,14 +942,16 @@ void CWindowOverview::moveSelection(int dx, int dy) {
     if (selectedIndex < 0 || selectedIndex >= (int)previews.size())
         selectedIndex = 0;
 
-    const int col    = selectedIndex % gridCols;
-    const int row    = selectedIndex / gridCols;
-    const int newCol = std::clamp(col + dx, 0, gridCols - 1);
-    const int maxRow = (previews.size() - 1) / gridCols;
-    const int newRow = std::clamp(row + dy, 0, maxRow);
-    int       next   = newRow * gridCols + newCol;
+    const int  cols   = std::max(1, gridCols);
+    const auto cell   = visualCellForPreviewIndex(selectedIndex);
+    const int  row    = cell.first;
+    const int  col    = cell.second;
+    const int  newCol = std::clamp(col + dx, 0, cols - 1);
+    const int  maxRow = ((int)previews.size() - 1) / cols;
+    const int  newRow = std::clamp(row + dy, 0, maxRow);
+    int        next   = previewIndexForVisualCell(newRow, newCol);
 
-    if (next >= (int)previews.size())
+    if (next < 0)
         next = previews.size() - 1;
 
     if (next != selectedIndex) {
