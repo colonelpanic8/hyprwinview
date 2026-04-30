@@ -29,47 +29,73 @@ For development:
 direnv allow
 ```
 
-## Hyprland Config
+## Hyprland Lua Config
 
 Load the plugin:
 
-```hyprlang
-exec-once = hyprctl plugin load /path/to/libhyprwinview.so
+```lua
+hl.exec_once("hyprctl plugin load /path/to/libhyprwinview.so")
 ```
 
 Example bindings:
 
-```hyprlang
-bind = SUPER, tab, hyprwinview:overview, toggle
-bind = SUPER, return, hyprwinview:overview, select
-bind = SUPER SHIFT, return, hyprwinview:overview, bring
-bind = SUPER, escape, hyprwinview:overview, close
+```lua
+hl.bind("SUPER + Tab", hl.dsp.exec_cmd("hyprctl dispatch hyprwinview:overview toggle"))
+hl.bind("SUPER + Return", hl.dsp.exec_cmd("hyprctl dispatch hyprwinview:overview select"))
+hl.bind("SUPER + SHIFT + Return", hl.dsp.exec_cmd("hyprctl dispatch hyprwinview:overview bring"))
+hl.bind("SUPER + Escape", hl.dsp.exec_cmd("hyprctl dispatch hyprwinview:overview close"))
 ```
 
 Plugin options:
 
-```hyprlang
-plugin {
-    hyprwinview {
-        gap_size = 24
-        margin = 48
-        bg_col = rgba(101014ee)
-        border_col = rgba(ffffff33)
-        hover_border_col = rgba(66ccffee)
-        border_size = 3
-        keys_left = a,h,left
-        keys_right = d,l,right
-        keys_up = w,k,up
-        keys_down = s,j,down
-        keys_go = return,enter,space,g
-        keys_bring = b,shift+return,shift+space
-        keys_close = escape,q
-    }
-}
+```lua
+hl.config({
+    plugin = {
+        hyprwinview = {
+            gap_size = 24,
+            margin = 48,
+            bg_col = "rgba(101014ee)",
+            border_col = "rgba(ffffff33)",
+            hover_border_col = "rgba(66ccffee)",
+            border_size = 3,
+            keys_left = "a,h,left",
+            keys_right = "d,l,right",
+            keys_up = "w,k,up",
+            keys_down = "s,j,down",
+            keys_go = "return,enter,space,g",
+            keys_bring = "b,shift+return,shift+space",
+            keys_close = "escape,q",
+            show_app_icon = true,
+            app_icon_size = 48,
+            app_icon_position = "bottom right",
+            app_icon_anchor_x = -1.0,
+            app_icon_anchor_y = -1.0,
+            app_icon_margin_x = 10,
+            app_icon_margin_y = 10,
+            app_icon_margin_relative_x = 0.0,
+            app_icon_margin_relative_y = 0.0,
+            app_icon_offset_x = 0,
+            app_icon_offset_y = 0,
+            app_icon_backplate_col = "rgba(00000066)",
+            app_icon_backplate_padding = 6,
+        },
+    },
+})
 ```
 
 Keyboard key sets are comma-separated. Modifiers can be written with `+`, for
 example `shift+return`.
+
+`app_icon_position` accepts `left`, `right`, `top`, `bottom`, and `center`,
+including combinations like `top left` or `bottom right`; single edges like
+`top` or `right` center the other axis. Set `app_icon_anchor_x` or
+`app_icon_anchor_y` to a value from `0.0` to `1.0` to override the token position
+on an axis (`0.0` is left/top, `0.5` is center, `1.0` is right/bottom). Margins
+are logical pixels plus optional relative tile fractions; offsets are final
+logical-pixel nudges.
+
+On Hyprland 0.54 and older hyprlang configs, the same options live under
+`plugin { hyprwinview { ... } }`.
 
 ## Dispatchers
 

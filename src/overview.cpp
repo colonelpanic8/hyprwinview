@@ -1,8 +1,8 @@
 #include "overview.hpp"
 
 #include <algorithm>
-#include <cmath>
 #include <cctype>
+#include <cmath>
 #include <sstream>
 #include <string>
 
@@ -22,6 +22,7 @@
 
 #include <xkbcommon/xkbcommon.h>
 
+#include "AppIcon.hpp"
 #include "WinviewPassElement.hpp"
 #include "globals.hpp"
 
@@ -87,6 +88,71 @@ static const CConfigValue<Config::STRING>& PKEYSBRING() {
 
 static const CConfigValue<Config::STRING>& PKEYSCLOSE() {
     static const CConfigValue<Config::STRING> VALUE("plugin:hyprwinview:keys_close");
+    return VALUE;
+}
+
+static const CConfigValue<Config::BOOL>& PSHOWAPPICON() {
+    static const CConfigValue<Config::BOOL> VALUE("plugin:hyprwinview:show_app_icon");
+    return VALUE;
+}
+
+static const CConfigValue<Config::INTEGER>& PAPPICONSIZE() {
+    static const CConfigValue<Config::INTEGER> VALUE("plugin:hyprwinview:app_icon_size");
+    return VALUE;
+}
+
+static const CConfigValue<Config::STRING>& PAPPICONPOSITION() {
+    static const CConfigValue<Config::STRING> VALUE("plugin:hyprwinview:app_icon_position");
+    return VALUE;
+}
+
+static const CConfigValue<Config::FLOAT>& PAPPICONANCHORX() {
+    static const CConfigValue<Config::FLOAT> VALUE("plugin:hyprwinview:app_icon_anchor_x");
+    return VALUE;
+}
+
+static const CConfigValue<Config::FLOAT>& PAPPICONANCHORY() {
+    static const CConfigValue<Config::FLOAT> VALUE("plugin:hyprwinview:app_icon_anchor_y");
+    return VALUE;
+}
+
+static const CConfigValue<Config::INTEGER>& PAPPICONMARGINX() {
+    static const CConfigValue<Config::INTEGER> VALUE("plugin:hyprwinview:app_icon_margin_x");
+    return VALUE;
+}
+
+static const CConfigValue<Config::INTEGER>& PAPPICONMARGINY() {
+    static const CConfigValue<Config::INTEGER> VALUE("plugin:hyprwinview:app_icon_margin_y");
+    return VALUE;
+}
+
+static const CConfigValue<Config::FLOAT>& PAPPICONMARGINRELX() {
+    static const CConfigValue<Config::FLOAT> VALUE("plugin:hyprwinview:app_icon_margin_relative_x");
+    return VALUE;
+}
+
+static const CConfigValue<Config::FLOAT>& PAPPICONMARGINRELY() {
+    static const CConfigValue<Config::FLOAT> VALUE("plugin:hyprwinview:app_icon_margin_relative_y");
+    return VALUE;
+}
+
+static const CConfigValue<Config::INTEGER>& PAPPICONOFFSETX() {
+    static const CConfigValue<Config::INTEGER> VALUE("plugin:hyprwinview:app_icon_offset_x");
+    return VALUE;
+}
+
+static const CConfigValue<Config::INTEGER>& PAPPICONOFFSETY() {
+    static const CConfigValue<Config::INTEGER> VALUE("plugin:hyprwinview:app_icon_offset_y");
+    return VALUE;
+}
+
+static const CConfigValue<Config::INTEGER>& PAPPICONBACKPLATE() {
+    static const CConfigValue<Config::INTEGER> VALUE("plugin:hyprwinview:app_icon_backplate_col");
+    return VALUE;
+}
+
+static const CConfigValue<Config::INTEGER>& PAPPICONBACKPLATEPADDING() {
+    static const CConfigValue<Config::INTEGER> VALUE("plugin:hyprwinview:app_icon_backplate_padding");
     return VALUE;
 }
 
@@ -187,6 +253,81 @@ static bool matchesKeySet(const CConfigValue<Config::STRING>& keys, xkb_keysym_t
     }
 
     return false;
+}
+
+static std::string lower(std::string value) {
+    std::ranges::transform(value, value.begin(), [](unsigned char c) { return std::tolower(c); });
+    return value;
+}
+
+static Vector2D iconAnchorFromPosition(const std::string& position) {
+    auto   anchor = Vector2D{1.0, 1.0};
+    auto   value  = lower(position);
+    size_t start  = 0;
+    bool   hasX   = false;
+    bool   hasY   = false;
+    bool   center = false;
+
+    while (start < value.size()) {
+        const auto END   = value.find_first_of(" ,", start);
+        const auto TOKEN = value.substr(start, END == std::string::npos ? std::string::npos : END - start);
+
+        if (TOKEN == "left") {
+            anchor.x = 0.0;
+            hasX     = true;
+        } else if (TOKEN == "right") {
+            anchor.x = 1.0;
+            hasX     = true;
+        } else if (TOKEN == "top") {
+            anchor.y = 0.0;
+            hasY     = true;
+        } else if (TOKEN == "bottom") {
+            anchor.y = 1.0;
+            hasY     = true;
+        } else if (TOKEN == "center" || TOKEN == "middle")
+            center = true;
+
+        if (END == std::string::npos)
+            break;
+
+        start = value.find_first_not_of(" ,", END);
+        if (start == std::string::npos)
+            break;
+    }
+
+    if (center || (hasY && !hasX))
+        anchor.x = hasX ? anchor.x : 0.5;
+
+    if (center || (hasX && !hasY))
+        anchor.y = hasY ? anchor.y : 0.5;
+
+    return anchor;
+}
+
+static double anchorOverride(double configured, double fallback) {
+    return configured >= 0.0 ? std::clamp(configured, 0.0, 1.0) : fallback;
+}
+
+static double edgeSignedMargin(double anchor, double absolute, double relative, double extent) {
+    if (anchor < 0.5)
+        return absolute + relative * extent;
+    if (anchor > 0.5)
+        return -(absolute + relative * extent);
+    return 0.0;
+}
+
+static CBox appIconBoxForTile(const CBox& tileLogical, double scale) {
+    const int  SIZE = std::max<Config::INTEGER>(1, *PAPPICONSIZE());
+    Vector2D   anchor = iconAnchorFromPosition(*PAPPICONPOSITION());
+    anchor.x          = anchorOverride(*PAPPICONANCHORX(), anchor.x);
+    anchor.y          = anchorOverride(*PAPPICONANCHORY(), anchor.y);
+
+    const double xMargin = edgeSignedMargin(anchor.x, *PAPPICONMARGINX(), *PAPPICONMARGINRELX(), tileLogical.w);
+    const double yMargin = edgeSignedMargin(anchor.y, *PAPPICONMARGINY(), *PAPPICONMARGINRELY(), tileLogical.h);
+    const double x       = tileLogical.x + anchor.x * std::max(0.0, tileLogical.w - SIZE) + xMargin + *PAPPICONOFFSETX();
+    const double y       = tileLogical.y + anchor.y * std::max(0.0, tileLogical.h - SIZE) + yMargin + *PAPPICONOFFSETY();
+
+    return CBox{x, y, (double)SIZE, (double)SIZE}.scale(scale).round();
 }
 
 static bool previewableWindow(const PHLWINDOW& window) {
@@ -377,6 +518,19 @@ void CWindowOverview::draw() {
         g_pHyprRenderer->m_renderData.clipBox = tilePx;
         Render::GL::g_pHyprOpenGL->renderTexture(preview.fb->getTexture(), texBox, {.damage = &fullDamage, .a = 1.0, .round = BORDER * 2});
         g_pHyprRenderer->m_renderData.clipBox = {};
+
+        if (*PSHOWAPPICON()) {
+            const int ICON_SIZE_PX = std::max(1, (int)std::round(std::max<Config::INTEGER>(1, *PAPPICONSIZE()) * SCALE));
+            if (const auto ICON = appIconTextureForWindow(preview.window, ICON_SIZE_PX)) {
+                CBox       iconBox = appIconBoxForTile(preview.tileLogical, SCALE);
+                const int PADDING = std::max(0, (int)std::round(std::max<Config::INTEGER>(0, *PAPPICONBACKPLATEPADDING()) * SCALE));
+                if (PADDING > 0)
+                    Render::GL::g_pHyprOpenGL->renderRect(iconBox.copy().expand(PADDING).round(), CHyprColor(*PAPPICONBACKPLATE()),
+                                                          {.damage = &fullDamage, .round = std::max(1, PADDING)});
+
+                Render::GL::g_pHyprOpenGL->renderTexture(ICON, iconBox, {.damage = &fullDamage, .a = 1.0});
+            }
+        }
     }
 }
 

@@ -2,7 +2,9 @@
 
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/config/ConfigManager.hpp>
+#include <hyprland/src/config/values/types/BoolValue.hpp>
 #include <hyprland/src/config/values/types/ColorValue.hpp>
+#include <hyprland/src/config/values/types/FloatValue.hpp>
 #include <hyprland/src/config/values/types/IntValue.hpp>
 #include <hyprland/src/config/values/types/StringValue.hpp>
 #include <hyprland/src/debug/log/Logger.hpp>
@@ -13,6 +15,7 @@
 
 #include <lua.hpp>
 
+#include "AppIcon.hpp"
 #include "globals.hpp"
 #include "overview.hpp"
 
@@ -104,6 +107,19 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprwinview:keys_go", "go keys", "return,enter,space,g"));
     addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprwinview:keys_bring", "bring keys", "b,shift+return,shift+space"));
     addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprwinview:keys_close", "close keys", "escape,q"));
+    addConfigValue(makeShared<Config::Values::CBoolValue>("plugin:hyprwinview:show_app_icon", "show app icon overlays", false));
+    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprwinview:app_icon_size", "app icon size", 48));
+    addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprwinview:app_icon_position", "app icon position", "bottom right"));
+    addConfigValue(makeShared<Config::Values::CFloatValue>("plugin:hyprwinview:app_icon_anchor_x", "app icon normalized x anchor override", -1.0F));
+    addConfigValue(makeShared<Config::Values::CFloatValue>("plugin:hyprwinview:app_icon_anchor_y", "app icon normalized y anchor override", -1.0F));
+    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprwinview:app_icon_margin_x", "app icon horizontal margin", 10));
+    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprwinview:app_icon_margin_y", "app icon vertical margin", 10));
+    addConfigValue(makeShared<Config::Values::CFloatValue>("plugin:hyprwinview:app_icon_margin_relative_x", "app icon relative horizontal margin", 0.0F));
+    addConfigValue(makeShared<Config::Values::CFloatValue>("plugin:hyprwinview:app_icon_margin_relative_y", "app icon relative vertical margin", 0.0F));
+    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprwinview:app_icon_offset_x", "app icon horizontal offset", 0));
+    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprwinview:app_icon_offset_y", "app icon vertical offset", 0));
+    addConfigValue(makeShared<Config::Values::CColorValue>("plugin:hyprwinview:app_icon_backplate_col", "app icon backplate color", 0x66000000));
+    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprwinview:app_icon_backplate_padding", "app icon backplate padding", 6));
 
     static auto renderStage = Event::bus()->m_events.render.stage.listen([](eRenderStage stage) {
         if (stage != RENDER_LAST_MOMENT || !g_pWindowOverview)
@@ -124,5 +140,6 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
 
 APICALL EXPORT void PLUGIN_EXIT() {
     g_pWindowOverview.reset();
+    clearAppIconCache();
     g_pHyprRenderer->m_renderPass.removeAllOfType("CWinviewPassElement");
 }

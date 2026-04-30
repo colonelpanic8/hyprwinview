@@ -16,6 +16,8 @@ add_library(hyprwinview SHARED ${SRC})
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(deps REQUIRED IMPORTED_TARGET
     hyprland
+    cairo
+    librsvg-2.0
     libdrm
     pixman-1
     wayland-server

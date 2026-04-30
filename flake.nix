@@ -35,6 +35,7 @@
         };
 
         inherit (hyprlandPkg) nativeBuildInputs;
+        buildInputs = [pkgs.librsvg];
 
         meta = {
           description = "A window overview plugin for Hyprland";
@@ -57,7 +58,7 @@
     in {
       default = pkgs.mkShell.override {stdenv = pkgs.gcc14Stdenv;} {
         name = "hyprwinview";
-        buildInputs = [hyprlandPkg];
+        buildInputs = [hyprlandPkg pkgs.librsvg];
         inputsFrom = [hyprlandPkg self.packages.${system}.default];
       };
     });
