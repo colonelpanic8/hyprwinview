@@ -17,6 +17,7 @@
 #include <hyprland/src/desktop/state/FocusState.hpp>
 #include <hyprland/src/desktop/view/Window.hpp>
 #include <hyprland/src/helpers/time/Time.hpp>
+#include <hyprland/src/layout/LayoutManager.hpp>
 #include <hyprland/src/managers/input/InputManager.hpp>
 #include <hyprland/src/managers/SeatManager.hpp>
 #include <hyprland/src/render/OpenGL.hpp>
@@ -1207,9 +1208,16 @@ void CWindowOverview::focusWindow(PHLWINDOW window, bool bring, bool replaceInit
     const auto MONITOR    = FOCUSSTATE->monitor();
     const auto TARGET_WORKSPACE = replaceInitial && initialFocusedWorkspace ? initialFocusedWorkspace : (MONITOR ? MONITOR->m_activeWorkspace : nullptr);
     const auto SELECTED_ORIGINAL_WORKSPACE = window->m_workspace;
+    const auto SELECTED_TARGET = window->layoutTarget();
+    const auto INITIAL_TARGET  = initialFocusedWindow ? initialFocusedWindow->layoutTarget() : SP<Layout::ITarget>{};
+    const bool CAN_REPLACE_INITIAL = replaceInitial && g_layoutManager && initialFocusedWindow && initialFocusedWindow != window && initialFocusedWindow->m_isMapped &&
+        initialFocusedWindow->m_workspace && SELECTED_ORIGINAL_WORKSPACE && SELECTED_TARGET && INITIAL_TARGET && !window->isFullscreen() &&
+        !initialFocusedWindow->isFullscreen();
 
-    if (replaceInitial && initialFocusedWindow && initialFocusedWindow != window && initialFocusedWindow->m_isMapped && initialFocusedWindow->m_workspace && SELECTED_ORIGINAL_WORKSPACE &&
-        initialFocusedWindow->m_workspace != SELECTED_ORIGINAL_WORKSPACE) {
+    if (CAN_REPLACE_INITIAL) {
+        g_layoutManager->switchTargets(SELECTED_TARGET, INITIAL_TARGET, true);
+    } else if (replaceInitial && initialFocusedWindow && initialFocusedWindow != window && initialFocusedWindow->m_isMapped && initialFocusedWindow->m_workspace &&
+        SELECTED_ORIGINAL_WORKSPACE && initialFocusedWindow->m_workspace != SELECTED_ORIGINAL_WORKSPACE) {
         g_pCompositor->moveWindowToWorkspaceSafe(initialFocusedWindow, SELECTED_ORIGINAL_WORKSPACE);
         initialFocusedWindow->m_workspace = SELECTED_ORIGINAL_WORKSPACE;
     }
