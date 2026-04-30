@@ -2,6 +2,7 @@
 
 #define WLR_USE_UNSTABLE
 
+#include <chrono>
 #include <hyprland/src/desktop/DesktopTypes.hpp>
 #include <hyprland/src/event/EventBus.hpp>
 #include <hyprland/src/render/Framebuffer.hpp>
@@ -19,12 +20,16 @@ struct SWinviewKeyConfig {
     std::vector<std::string> close;
 };
 
+struct SWindowOverviewOptions {
+    bool includeCurrentWorkspace = true;
+};
+
 SWinviewKeyConfig defaultWinviewKeyConfig();
 void              setWinviewKeyConfig(SWinviewKeyConfig config);
 
 class CWindowOverview {
   public:
-    explicit CWindowOverview(PHLMONITOR monitor);
+    explicit CWindowOverview(PHLMONITOR monitor, SWindowOverviewOptions options = {});
     ~CWindowOverview();
 
     void render();
@@ -32,6 +37,9 @@ class CWindowOverview {
     void damage();
     void close(bool focusSelection = false, bool bringSelection = false, bool replaceInitialSelection = false);
     void selectHoveredWindow();
+    bool isAnimating() const;
+    bool backgroundBlurEnabled() const;
+    bool backgroundOpaque() const;
 
     PHLMONITORREF pMonitor;
 
@@ -40,9 +48,13 @@ class CWindowOverview {
         PHLWINDOW                 window;
         SP<Render::IFramebuffer>  fb;
         CBox                     tileLogical;
+        std::string              orderGroupKey;
+        size_t                   orderOriginalIndex = 0;
+        size_t                   orderGroupIndex    = 0;
     };
 
     void                  collectWindows();
+    void                  applyWindowOrdering();
     void                  renderSnapshots();
     void                  updateLayout();
     int                   hoveredIndex() const;
@@ -50,14 +62,22 @@ class CWindowOverview {
     void                  moveSelection(int dx, int dy);
     void                  runSelected(bool bring, bool replaceInitial = false);
     bool                  handleKey(const IKeyboard::SKeyEvent& event);
+    void                  finishClose();
+    double                animationVisibleAmount() const;
+    double                tileAnimationVisibleAmount(size_t index) const;
+    double                tileAnimationDelayMs(size_t index) const;
+    double                maxTileAnimationDelayMs() const;
+    bool                  animationComplete() const;
 
     std::vector<SWindowPreview> previews;
+    SWindowOverviewOptions      options;
     PHLWINDOW                   initialFocusedWindow;
     PHLWORKSPACE                initialFocusedWorkspace;
     Vector2D                    lastMousePosLocal;
     int                         selectedIndex = -1;
     int                         gridCols      = 1;
     bool                        closing       = false;
+    std::chrono::steady_clock::time_point animationStartedAt;
 
     CHyprSignalListener         mouseMoveHook;
     CHyprSignalListener         mouseButtonHook;

@@ -14,7 +14,12 @@
 
 #include <lua.hpp>
 
+#include <algorithm>
+#include <cctype>
+#include <optional>
+#include <sstream>
 #include <utility>
+#include <vector>
 
 #include "AppIcon.hpp"
 #include "globals.hpp"
@@ -38,11 +43,95 @@ static bool addConfigValue(SP<Config::Values::IValue> value) {
     return true;
 }
 
-static SDispatchResult onWinviewDispatcher(std::string arg) {
-    if (arg.empty())
-        arg = "toggle";
+struct SWinviewDispatcherArgs {
+    std::string            action = "toggle";
+    SWindowOverviewOptions options;
+};
 
-    if (arg == "select") {
+static std::string normalizedArgToken(std::string token) {
+    auto notSpace = [](unsigned char c) { return !std::isspace(c); };
+    token.erase(token.begin(), std::ranges::find_if(token, notSpace));
+    token.erase(std::ranges::find_if(token.rbegin(), token.rend(), notSpace).base(), token.end());
+    std::ranges::transform(token, token.begin(), [](unsigned char c) {
+        if (c == '_')
+            return '-';
+        return (char)std::tolower(c);
+    });
+    return token;
+}
+
+static std::vector<std::string> argTokens(const std::string& arg) {
+    std::vector<std::string> result;
+    std::string              normalized = arg;
+    std::ranges::replace(normalized, ',', ' ');
+    std::stringstream stream(normalized);
+    std::string       token;
+
+    while (stream >> token) {
+        token = normalizedArgToken(token);
+        if (!token.empty())
+            result.push_back(token);
+    }
+
+    return result;
+}
+
+static bool isDispatcherAction(const std::string& token) {
+    return token == "select" || token == "bring" || token == "bring-replace" || token == "replace" || token == "off" || token == "close" || token == "disable" ||
+        token == "toggle" || token == "open" || token == "show" || token == "on";
+}
+
+static bool applyOverviewOption(const std::string& token, SWindowOverviewOptions& options) {
+    if (token == "exclude-current-workspace" || token == "without-current-workspace" || token == "no-current-workspace" || token == "other-workspaces" ||
+        token == "not-current-workspace" || token == "include-current-workspace=false" || token == "current-workspace=false") {
+        options.includeCurrentWorkspace = false;
+        return true;
+    }
+
+    if (token == "all" || token == "default" || token == "include-current-workspace" || token == "with-current-workspace" || token == "current-workspace" ||
+        token == "include-current-workspace=true" || token == "current-workspace=true") {
+        options.includeCurrentWorkspace = true;
+        return true;
+    }
+
+    return false;
+}
+
+static std::optional<SWinviewDispatcherArgs> parseWinviewDispatcherArgs(const std::string& arg, std::string& error) {
+    SWinviewDispatcherArgs args;
+    bool                   sawAction = false;
+
+    for (const auto& token : argTokens(arg.empty() ? "toggle" : arg)) {
+        if (isDispatcherAction(token)) {
+            if (sawAction) {
+                error = "multiple overview actions provided";
+                return std::nullopt;
+            }
+
+            args.action = token;
+            sawAction   = true;
+            continue;
+        }
+
+        if (applyOverviewOption(token, args.options))
+            continue;
+
+        error = "unknown overview argument: " + token;
+        return std::nullopt;
+    }
+
+    return args;
+}
+
+static SDispatchResult onWinviewDispatcher(std::string arg) {
+    std::string error;
+    const auto  ARGS = parseWinviewDispatcherArgs(arg, error);
+    if (!ARGS)
+        return {.success = false, .error = error};
+
+    const auto& ACTION = ARGS->action;
+
+    if (ACTION == "select") {
         if (g_pWindowOverview) {
             g_pWindowOverview->selectHoveredWindow();
             g_pWindowOverview->close(true);
@@ -50,7 +139,7 @@ static SDispatchResult onWinviewDispatcher(std::string arg) {
         return {};
     }
 
-    if (arg == "bring") {
+    if (ACTION == "bring") {
         if (g_pWindowOverview) {
             g_pWindowOverview->selectHoveredWindow();
             g_pWindowOverview->close(true, true);
@@ -58,7 +147,7 @@ static SDispatchResult onWinviewDispatcher(std::string arg) {
         return {};
     }
 
-    if (arg == "bring-replace" || arg == "bring_replace" || arg == "replace") {
+    if (ACTION == "bring-replace" || ACTION == "replace") {
         if (g_pWindowOverview) {
             g_pWindowOverview->selectHoveredWindow();
             g_pWindowOverview->close(true, true, true);
@@ -66,13 +155,13 @@ static SDispatchResult onWinviewDispatcher(std::string arg) {
         return {};
     }
 
-    if (arg == "off" || arg == "close" || arg == "disable") {
+    if (ACTION == "off" || ACTION == "close" || ACTION == "disable") {
         if (g_pWindowOverview)
             g_pWindowOverview->close(false);
         return {};
     }
 
-    if (arg == "toggle" && g_pWindowOverview) {
+    if (ACTION == "toggle" && g_pWindowOverview) {
         g_pWindowOverview->close(false);
         return {};
     }
@@ -81,12 +170,42 @@ static SDispatchResult onWinviewDispatcher(std::string arg) {
     if (!MONITOR)
         return {.success = false, .error = "no focused monitor"};
 
-    g_pWindowOverview = std::make_unique<CWindowOverview>(MONITOR);
+    g_pWindowOverview = std::make_unique<CWindowOverview>(MONITOR, ARGS->options);
     return {};
 }
 
 static int luaWinviewOverview(lua_State* L) {
-    const auto RESULT = onWinviewDispatcher(luaL_optstring(L, 1, "toggle"));
+    std::string arg = "toggle";
+
+    if (lua_gettop(L) >= 1 && !lua_isnil(L, 1)) {
+        if (lua_istable(L, 1)) {
+            lua_getfield(L, 1, "action");
+            if (lua_isstring(L, -1))
+                arg = lua_tostring(L, -1);
+            else if (!lua_isnil(L, -1))
+                return luaL_error(L, "hyprwinview.overview: field \"action\" must be a string");
+            lua_pop(L, 1);
+
+            lua_getfield(L, 1, "exclude_current_workspace");
+            if (lua_isboolean(L, -1) && lua_toboolean(L, -1))
+                arg += " exclude-current-workspace";
+            else if (!lua_isnil(L, -1) && !lua_isboolean(L, -1))
+                return luaL_error(L, "hyprwinview.overview: field \"exclude_current_workspace\" must be a boolean");
+            lua_pop(L, 1);
+
+            lua_getfield(L, 1, "include_current_workspace");
+            if (lua_isboolean(L, -1) && !lua_toboolean(L, -1))
+                arg += " exclude-current-workspace";
+            else if (!lua_isnil(L, -1) && !lua_isboolean(L, -1))
+                return luaL_error(L, "hyprwinview.overview: field \"include_current_workspace\" must be a boolean");
+            lua_pop(L, 1);
+        } else if (lua_isstring(L, 1))
+            arg = lua_tostring(L, 1);
+        else
+            return luaL_error(L, "hyprwinview.overview: argument must be a string or table");
+    }
+
+    const auto RESULT = onWinviewDispatcher(arg);
     if (!RESULT.success)
         return luaL_error(L, "%s", RESULT.error.c_str());
     return 0;
@@ -172,15 +291,18 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
 
     addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprwinview:gap_size", "gap size", 24));
     addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprwinview:margin", "margin", 48));
-    addConfigValue(makeShared<Config::Values::CColorValue>("plugin:hyprwinview:bg_col", "background color", 0xEE101014));
+    addConfigValue(makeShared<Config::Values::CColorValue>("plugin:hyprwinview:background", "background color", 0x99101014));
+    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprwinview:background_blur", "blur the background behind the overview", 0));
+    addConfigValue(makeShared<Config::Values::CColorValue>("plugin:hyprwinview:bg_col", "legacy background color alias", 0x99101014));
     addConfigValue(makeShared<Config::Values::CColorValue>("plugin:hyprwinview:border_col", "border color", 0x33FFFFFF));
     addConfigValue(makeShared<Config::Values::CColorValue>("plugin:hyprwinview:hover_border_col", "hover border color", 0xEE66CCFF));
     addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprwinview:border_size", "border size", 3));
+    addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprwinview:window_order", "overview window ordering strategy", "natural"));
     addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprwinview:keys_left", "left keys", "a,h,left"));
     addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprwinview:keys_right", "right keys", "d,l,right"));
     addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprwinview:keys_up", "up keys", "w,k,up"));
     addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprwinview:keys_down", "down keys", "s,j,down"));
-    addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprwinview:keys_go", "go keys", "return,enter,space,g"));
+    addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprwinview:keys_go", "go keys", "return,enter,space,g,f"));
     addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprwinview:keys_bring", "bring keys", "b,shift+return,shift+space"));
     addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprwinview:keys_bring_replace", "bring replace keys", "shift+b"));
     addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprwinview:keys_close", "close keys", "escape,q"));
@@ -200,6 +322,12 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprwinview:app_icon_offset_y", "app icon vertical offset", 0));
     addConfigValue(makeShared<Config::Values::CColorValue>("plugin:hyprwinview:app_icon_backplate_col", "app icon backplate color", 0x66000000));
     addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprwinview:app_icon_backplate_padding", "app icon backplate padding", 6));
+    addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprwinview:animation", "overview animation mode", "fade_scale"));
+    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprwinview:animation_in_ms", "overview open animation duration in milliseconds", 180));
+    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprwinview:animation_out_ms", "overview close animation duration in milliseconds", 140));
+    addConfigValue(makeShared<Config::Values::CFloatValue>("plugin:hyprwinview:animation_scale", "overview fade_scale starting scale", 0.94F));
+    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprwinview:animation_stagger_ms", "overview staggered animation delay between tiles in milliseconds", 16));
+    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprwinview:animation_stagger_max_ms", "overview staggered animation maximum tile delay in milliseconds", 120));
 
     static auto renderStage = Event::bus()->m_events.render.stage.listen([](eRenderStage stage) {
         if (stage != RENDER_LAST_MOMENT || !g_pWindowOverview)

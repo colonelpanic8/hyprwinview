@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cmath>
 #include <optional>
 #include <sstream>
@@ -43,6 +44,16 @@ static const CConfigValue<Config::INTEGER>& PBG() {
     return VALUE;
 }
 
+static const CConfigValue<Config::INTEGER>& PBACKGROUND() {
+    static const CConfigValue<Config::INTEGER> VALUE("plugin:hyprwinview:background");
+    return VALUE;
+}
+
+static const CConfigValue<Config::INTEGER>& PBACKGROUNDBLUR() {
+    static const CConfigValue<Config::INTEGER> VALUE("plugin:hyprwinview:background_blur");
+    return VALUE;
+}
+
 static const CConfigValue<Config::INTEGER>& PBORDER() {
     static const CConfigValue<Config::INTEGER> VALUE("plugin:hyprwinview:border_col");
     return VALUE;
@@ -55,6 +66,11 @@ static const CConfigValue<Config::INTEGER>& PHOVERBORDER() {
 
 static const CConfigValue<Config::INTEGER>& PBORDERSIZE() {
     static const CConfigValue<Config::INTEGER> VALUE("plugin:hyprwinview:border_size");
+    return VALUE;
+}
+
+static const CConfigValue<Config::STRING>& PWINDOWORDER() {
+    static const CConfigValue<Config::STRING> VALUE("plugin:hyprwinview:window_order");
     return VALUE;
 }
 
@@ -163,7 +179,51 @@ static const CConfigValue<Config::INTEGER>& PAPPICONBACKPLATEPADDING() {
     return VALUE;
 }
 
+static const CConfigValue<Config::STRING>& PANIMATION() {
+    static const CConfigValue<Config::STRING> VALUE("plugin:hyprwinview:animation");
+    return VALUE;
+}
+
+static const CConfigValue<Config::INTEGER>& PANIMATIONINMS() {
+    static const CConfigValue<Config::INTEGER> VALUE("plugin:hyprwinview:animation_in_ms");
+    return VALUE;
+}
+
+static const CConfigValue<Config::INTEGER>& PANIMATIONOUTMS() {
+    static const CConfigValue<Config::INTEGER> VALUE("plugin:hyprwinview:animation_out_ms");
+    return VALUE;
+}
+
+static const CConfigValue<Config::FLOAT>& PANIMATIONSCALE() {
+    static const CConfigValue<Config::FLOAT> VALUE("plugin:hyprwinview:animation_scale");
+    return VALUE;
+}
+
+static const CConfigValue<Config::INTEGER>& PANIMATIONSTAGGERMS() {
+    static const CConfigValue<Config::INTEGER> VALUE("plugin:hyprwinview:animation_stagger_ms");
+    return VALUE;
+}
+
+static const CConfigValue<Config::INTEGER>& PANIMATIONSTAGGERMAXMS() {
+    static const CConfigValue<Config::INTEGER> VALUE("plugin:hyprwinview:animation_stagger_max_ms");
+    return VALUE;
+}
+
+enum class EOverviewAnimation {
+    NONE,
+    FADE,
+    FADE_SCALE,
+    STAGGERED_FADE_SCALE,
+};
+
+struct SWindowOrderingStrategy {
+    const char* name;
+    std::string (*groupKeyForWindow)(const PHLWINDOW& window, size_t originalIndex);
+};
+
 static std::optional<SWinviewKeyConfig> g_winviewKeyConfigOverride;
+
+static constexpr uint64_t DEFAULT_BACKGROUND = 0x99101014;
 
 SWinviewKeyConfig defaultWinviewKeyConfig() {
     return {
@@ -171,7 +231,7 @@ SWinviewKeyConfig defaultWinviewKeyConfig() {
         .right = {"d", "l", "right"},
         .up    = {"w", "k", "up"},
         .down  = {"s", "j", "down"},
-        .go    = {"return", "enter", "space", "g"},
+        .go    = {"return", "enter", "space", "g", "f"},
         .bring = {"b", "shift+return", "shift+space"},
         .bringReplace = {"shift+b"},
         .close = {"escape", "q"},
@@ -305,6 +365,115 @@ static std::string lower(std::string value) {
     return value;
 }
 
+static std::string uniqueWindowGroupKey(const PHLWINDOW&, size_t originalIndex) {
+    return "window:" + std::to_string(originalIndex);
+}
+
+static std::string applicationGroupKey(const PHLWINDOW& window, size_t originalIndex) {
+    if (window) {
+        for (const auto& candidate : {window->m_class, window->m_initialClass}) {
+            const auto KEY = trimmedLower(candidate);
+            if (!KEY.empty())
+                return "app:" + KEY;
+        }
+    }
+
+    return uniqueWindowGroupKey(window, originalIndex);
+}
+
+static const SWindowOrderingStrategy& naturalOrderStrategy() {
+    static const SWindowOrderingStrategy STRATEGY = {
+        .name              = "natural",
+        .groupKeyForWindow = uniqueWindowGroupKey,
+    };
+    return STRATEGY;
+}
+
+static const SWindowOrderingStrategy& applicationOrderStrategy() {
+    static const SWindowOrderingStrategy STRATEGY = {
+        .name              = "application",
+        .groupKeyForWindow = applicationGroupKey,
+    };
+    return STRATEGY;
+}
+
+static const SWindowOrderingStrategy& activeWindowOrderingStrategy() {
+    const auto NAME = trimmedLower(*PWINDOWORDER());
+
+    if (NAME.empty() || NAME == "none" || NAME == "natural" || NAME == "compositor")
+        return naturalOrderStrategy();
+
+    if (NAME == "app" || NAME == "application" || NAME == "application_grouped" || NAME == "group_app" || NAME == "group_by_app" || NAME == "grouped_by_app")
+        return applicationOrderStrategy();
+
+    return naturalOrderStrategy();
+}
+
+static EOverviewAnimation overviewAnimation() {
+    const auto NAME = trimmedLower(*PANIMATION());
+
+    if (NAME == "none" || NAME == "off" || NAME == "disable" || NAME == "disabled")
+        return EOverviewAnimation::NONE;
+    if (NAME == "fade")
+        return EOverviewAnimation::FADE;
+    if (NAME == "stagger" || NAME == "staggered" || NAME == "staggered_fade_scale")
+        return EOverviewAnimation::STAGGERED_FADE_SCALE;
+
+    return EOverviewAnimation::FADE_SCALE;
+}
+
+static bool animationScalesTiles(EOverviewAnimation animation) {
+    return animation == EOverviewAnimation::FADE_SCALE || animation == EOverviewAnimation::STAGGERED_FADE_SCALE;
+}
+
+static bool animationStaggersTiles(EOverviewAnimation animation) {
+    return animation == EOverviewAnimation::STAGGERED_FADE_SCALE;
+}
+
+static double animationDurationMs(bool closing) {
+    return std::max<Config::INTEGER>(0, closing ? *PANIMATIONOUTMS() : *PANIMATIONINMS());
+}
+
+static double easeOutCubic(double t) {
+    t = std::clamp(t, 0.0, 1.0);
+    return 1.0 - std::pow(1.0 - t, 3.0);
+}
+
+static double easeInCubic(double t) {
+    t = std::clamp(t, 0.0, 1.0);
+    return t * t * t;
+}
+
+static double visibleAmountForElapsed(double elapsedMs, double durationMs, bool closing) {
+    if (durationMs <= 0.0)
+        return closing ? 0.0 : 1.0;
+
+    const auto T = std::clamp(elapsedMs / durationMs, 0.0, 1.0);
+    return closing ? 1.0 - easeInCubic(T) : easeOutCubic(T);
+}
+
+static CBox scaleBoxFromCenter(const CBox& box, double scale) {
+    const auto CENTER = box.middle();
+    const auto W      = box.w * scale;
+    const auto H      = box.h * scale;
+
+    return {CENTER.x - W / 2.0, CENTER.y - H / 2.0, W, H};
+}
+
+static CHyprColor multiplyAlpha(const CHyprColor& color, double alpha) {
+    return color.modifyA(color.a * std::clamp(alpha, 0.0, 1.0));
+}
+
+static CHyprColor activeBackgroundColor() {
+    const auto BACKGROUND = static_cast<uint64_t>(*PBACKGROUND());
+    const auto BG_COL     = static_cast<uint64_t>(*PBG());
+
+    if (BACKGROUND == DEFAULT_BACKGROUND && BG_COL != DEFAULT_BACKGROUND)
+        return CHyprColor(BG_COL);
+
+    return CHyprColor(BACKGROUND);
+}
+
 static Vector2D iconAnchorFromPosition(const std::string& position) {
     auto   anchor = Vector2D{1.0, 1.0};
     auto   value  = lower(position);
@@ -385,8 +554,9 @@ static bool previewableWindow(const PHLWINDOW& window) {
     return true;
 }
 
-CWindowOverview::CWindowOverview(PHLMONITOR monitor) : pMonitor(monitor) {
-    initialFocusedWindow    = Desktop::focusState()->window();
+CWindowOverview::CWindowOverview(PHLMONITOR monitor, SWindowOverviewOptions options_) : pMonitor(monitor), options(options_) {
+    animationStartedAt = Time::steadyNow();
+    initialFocusedWindow = Desktop::focusState()->window();
     initialFocusedWorkspace = initialFocusedWindow && initialFocusedWindow->m_workspace ? initialFocusedWindow->m_workspace : (pMonitor ? pMonitor->m_activeWorkspace : nullptr);
 
     collectWindows();
@@ -399,8 +569,10 @@ CWindowOverview::CWindowOverview(PHLMONITOR monitor) : pMonitor(monitor) {
         selectedIndex = 0;
 
     auto onCursorMove = [this](Event::SCallbackInfo& info) {
-        if (closing)
+        if (closing) {
+            info.cancelled = true;
             return;
+        }
 
         info.cancelled    = true;
         lastMousePosLocal = g_pInputManager->getMouseCoordsInternal() - pMonitor->m_position;
@@ -411,8 +583,10 @@ CWindowOverview::CWindowOverview(PHLMONITOR monitor) : pMonitor(monitor) {
     };
 
     auto onCursorSelect = [this](Event::SCallbackInfo& info) {
-        if (closing)
+        if (closing) {
+            info.cancelled = true;
             return;
+        }
 
         info.cancelled = true;
         selectHoveredWindow();
@@ -420,8 +594,10 @@ CWindowOverview::CWindowOverview(PHLMONITOR monitor) : pMonitor(monitor) {
     };
 
     auto onKeyboardKey = [this](const IKeyboard::SKeyEvent& event, Event::SCallbackInfo& info) {
-        if (closing)
+        if (closing) {
+            info.cancelled = true;
             return;
+        }
 
         if (handleKey(event))
             info.cancelled = true;
@@ -446,15 +622,50 @@ CWindowOverview::~CWindowOverview() {
 void CWindowOverview::collectWindows() {
     previews.clear();
 
+    const auto CURRENT_WORKSPACE = pMonitor ? pMonitor->m_activeWorkspace : nullptr;
+
     for (auto it = g_pCompositor->m_windows.rbegin(); it != g_pCompositor->m_windows.rend(); ++it) {
         const auto& window = *it;
         if (!previewableWindow(window))
+            continue;
+
+        if (!options.includeCurrentWorkspace && CURRENT_WORKSPACE && window->m_workspace == CURRENT_WORKSPACE)
             continue;
 
         previews.push_back({.window = window});
     }
 
     std::ranges::reverse(previews);
+    applyWindowOrdering();
+}
+
+void CWindowOverview::applyWindowOrdering() {
+    if (previews.empty())
+        return;
+
+    const auto&              STRATEGY = activeWindowOrderingStrategy();
+    std::vector<std::string> groupOrder;
+
+    for (size_t i = 0; i < previews.size(); ++i) {
+        auto& preview               = previews[i];
+        preview.orderOriginalIndex  = i;
+        preview.orderGroupKey       = STRATEGY.groupKeyForWindow(preview.window, i);
+        const auto GROUP_ORDER_ITER = std::ranges::find(groupOrder, preview.orderGroupKey);
+
+        if (GROUP_ORDER_ITER == groupOrder.end()) {
+            preview.orderGroupIndex = groupOrder.size();
+            groupOrder.push_back(preview.orderGroupKey);
+        } else {
+            preview.orderGroupIndex = GROUP_ORDER_ITER - groupOrder.begin();
+        }
+    }
+
+    std::ranges::stable_sort(previews, [](const SWindowPreview& a, const SWindowPreview& b) {
+        if (a.orderGroupIndex != b.orderGroupIndex)
+            return a.orderGroupIndex < b.orderGroupIndex;
+
+        return a.orderOriginalIndex < b.orderOriginalIndex;
+    });
 }
 
 void CWindowOverview::updateLayout() {
@@ -535,6 +746,11 @@ int CWindowOverview::hoveredIndex() const {
 }
 
 void CWindowOverview::render() {
+    if (closing && animationComplete()) {
+        finishClose();
+        return;
+    }
+
     g_pHyprRenderer->m_renderPass.add(makeUnique<CWinviewPassElement>());
 }
 
@@ -545,16 +761,22 @@ void CWindowOverview::draw() {
     const auto SCALE       = pMonitor->m_scale;
     const auto HOVERED    = selectedIndex;
     const int  BORDER     = std::max<Config::INTEGER>(0, *PBORDERSIZE());
+    const auto ANIMATION   = overviewAnimation();
+    const auto VISIBLE     = animationVisibleAmount();
+    const auto BASE_SCALE  = std::clamp<double>(*PANIMATIONSCALE(), 0.01, 1.0);
     CRegion    fullDamage = {0, 0, INT16_MAX, INT16_MAX};
 
-    Render::GL::g_pHyprOpenGL->renderRect(CBox{{0, 0}, pMonitor->m_pixelSize}, CHyprColor(*PBG()).stripA(), {.damage = &fullDamage});
+    Render::GL::g_pHyprOpenGL->renderRect(CBox{{0, 0}, pMonitor->m_pixelSize}, multiplyAlpha(activeBackgroundColor(), VISIBLE),
+                                          {.damage = &fullDamage, .blur = backgroundBlurEnabled(), .blurA = (float)VISIBLE});
 
     for (size_t i = 0; i < previews.size(); ++i) {
         auto& preview = previews[i];
         if (!preview.fb || !preview.fb->getTexture())
             continue;
 
-        CBox tilePx = preview.tileLogical.copy().scale(SCALE).round();
+        const auto TILE_VISIBLE = tileAnimationVisibleAmount(i);
+        const auto TILE_SCALE   = animationScalesTiles(ANIMATION) ? BASE_SCALE + (1.0 - BASE_SCALE) * TILE_VISIBLE : 1.0;
+        CBox tilePx = scaleBoxFromCenter(preview.tileLogical, TILE_SCALE).scale(SCALE).round();
         CBox texBox = {
             tilePx.x,
             tilePx.y,
@@ -564,26 +786,29 @@ void CWindowOverview::draw() {
 
         if (BORDER > 0) {
             const auto COLOR = (int)i == HOVERED ? CHyprColor(*PHOVERBORDER()) : CHyprColor(*PBORDER());
-            Render::GL::g_pHyprOpenGL->renderRect(tilePx.copy().expand(BORDER), COLOR, {.damage = &fullDamage, .round = BORDER * 2});
+            Render::GL::g_pHyprOpenGL->renderRect(tilePx.copy().expand(BORDER), multiplyAlpha(COLOR, TILE_VISIBLE), {.damage = &fullDamage, .round = BORDER * 2});
         }
 
         g_pHyprRenderer->m_renderData.clipBox = tilePx;
-        Render::GL::g_pHyprOpenGL->renderTexture(preview.fb->getTexture(), texBox, {.damage = &fullDamage, .a = 1.0, .round = BORDER * 2});
+        Render::GL::g_pHyprOpenGL->renderTexture(preview.fb->getTexture(), texBox, {.damage = &fullDamage, .a = (float)TILE_VISIBLE, .round = BORDER * 2});
         g_pHyprRenderer->m_renderData.clipBox = {};
 
         if (*PSHOWAPPICON() != 0) {
             const int ICON_SIZE_PX = std::max(1, (int)std::round(std::max<Config::INTEGER>(1, *PAPPICONSIZE()) * SCALE));
             if (const auto ICON = appIconTextureForWindow(preview.window, ICON_SIZE_PX)) {
-                CBox       iconBox = appIconBoxForTile(preview.tileLogical, SCALE);
+                CBox       iconBox = scaleBoxFromCenter(appIconBoxForTile(preview.tileLogical, SCALE), TILE_SCALE);
                 const int PADDING = std::max(0, (int)std::round(std::max<Config::INTEGER>(0, *PAPPICONBACKPLATEPADDING()) * SCALE));
                 if (PADDING > 0)
-                    Render::GL::g_pHyprOpenGL->renderRect(iconBox.copy().expand(PADDING).round(), CHyprColor(*PAPPICONBACKPLATE()),
+                    Render::GL::g_pHyprOpenGL->renderRect(iconBox.copy().expand(PADDING).round(), multiplyAlpha(CHyprColor(*PAPPICONBACKPLATE()), TILE_VISIBLE),
                                                           {.damage = &fullDamage, .round = std::max(1, PADDING)});
 
-                Render::GL::g_pHyprOpenGL->renderTexture(ICON, iconBox, {.damage = &fullDamage, .a = 1.0});
+                Render::GL::g_pHyprOpenGL->renderTexture(ICON, iconBox, {.damage = &fullDamage, .a = (float)TILE_VISIBLE});
             }
         }
     }
+
+    if (isAnimating())
+        damage();
 }
 
 void CWindowOverview::damage() {
@@ -621,6 +846,81 @@ void CWindowOverview::moveSelection(int dx, int dy) {
 
 void CWindowOverview::runSelected(bool bring, bool replaceInitial) {
     close(true, bring, replaceInitial);
+}
+
+double CWindowOverview::animationVisibleAmount() const {
+    const auto ANIMATION = overviewAnimation();
+    if (ANIMATION == EOverviewAnimation::NONE)
+        return 1.0;
+
+    const auto DURATION = animationDurationMs(closing) + (closing ? maxTileAnimationDelayMs() : 0.0);
+    const auto ELAPSED = std::chrono::duration<double, std::milli>(Time::steadyNow() - animationStartedAt).count();
+
+    return visibleAmountForElapsed(ELAPSED, DURATION, closing);
+}
+
+double CWindowOverview::tileAnimationVisibleAmount(size_t index) const {
+    const auto ANIMATION = overviewAnimation();
+    if (ANIMATION == EOverviewAnimation::NONE)
+        return 1.0;
+
+    const auto DURATION = animationDurationMs(closing);
+    const auto ELAPSED  = std::chrono::duration<double, std::milli>(Time::steadyNow() - animationStartedAt).count() - tileAnimationDelayMs(index);
+
+    return visibleAmountForElapsed(ELAPSED, DURATION, closing);
+}
+
+double CWindowOverview::tileAnimationDelayMs(size_t index) const {
+    const auto ANIMATION = overviewAnimation();
+    if (!animationStaggersTiles(ANIMATION) || previews.empty())
+        return 0.0;
+
+    const auto STAGGER_MS     = std::max<Config::INTEGER>(0, *PANIMATIONSTAGGERMS());
+    const auto MAX_STAGGER_MS = std::max<Config::INTEGER>(0, *PANIMATIONSTAGGERMAXMS());
+    if (STAGGER_MS <= 0 || MAX_STAGGER_MS <= 0)
+        return 0.0;
+
+    const size_t ORDER_INDEX = closing ? previews.size() - 1 - std::min(index, previews.size() - 1) : index;
+    return std::min<double>(ORDER_INDEX * STAGGER_MS, MAX_STAGGER_MS);
+}
+
+double CWindowOverview::maxTileAnimationDelayMs() const {
+    const auto ANIMATION = overviewAnimation();
+    if (!animationStaggersTiles(ANIMATION) || previews.empty())
+        return 0.0;
+
+    const auto STAGGER_MS     = std::max<Config::INTEGER>(0, *PANIMATIONSTAGGERMS());
+    const auto MAX_STAGGER_MS = std::max<Config::INTEGER>(0, *PANIMATIONSTAGGERMAXMS());
+    if (STAGGER_MS <= 0 || MAX_STAGGER_MS <= 0)
+        return 0.0;
+
+    return std::min<double>((previews.size() - 1) * STAGGER_MS, MAX_STAGGER_MS);
+}
+
+bool CWindowOverview::animationComplete() const {
+    const auto ANIMATION = overviewAnimation();
+    if (ANIMATION == EOverviewAnimation::NONE)
+        return true;
+
+    const auto DURATION = animationDurationMs(closing);
+    if (DURATION <= 0.0)
+        return true;
+
+    const auto ELAPSED = std::chrono::duration<double, std::milli>(Time::steadyNow() - animationStartedAt).count();
+    const auto TOTAL_TIME_MS = DURATION + maxTileAnimationDelayMs();
+    return ELAPSED >= TOTAL_TIME_MS;
+}
+
+bool CWindowOverview::isAnimating() const {
+    return !animationComplete();
+}
+
+bool CWindowOverview::backgroundBlurEnabled() const {
+    return *PBACKGROUNDBLUR() != 0;
+}
+
+bool CWindowOverview::backgroundOpaque() const {
+    return !isAnimating() && activeBackgroundColor().a >= 1.0;
 }
 
 bool CWindowOverview::handleKey(const IKeyboard::SKeyEvent& event) {
@@ -669,11 +969,11 @@ void CWindowOverview::focusWindow(PHLWINDOW window, bool bring, bool replaceInit
 
     const auto FOCUSSTATE = Desktop::focusState();
     const auto MONITOR    = FOCUSSTATE->monitor();
-    const auto TARGET_WORKSPACE            = replaceInitial && initialFocusedWorkspace ? initialFocusedWorkspace : (MONITOR ? MONITOR->m_activeWorkspace : nullptr);
+    const auto TARGET_WORKSPACE = replaceInitial && initialFocusedWorkspace ? initialFocusedWorkspace : (MONITOR ? MONITOR->m_activeWorkspace : nullptr);
     const auto SELECTED_ORIGINAL_WORKSPACE = window->m_workspace;
 
-    if (replaceInitial && initialFocusedWindow && initialFocusedWindow != window && initialFocusedWindow->m_isMapped && initialFocusedWindow->m_workspace &&
-        SELECTED_ORIGINAL_WORKSPACE && initialFocusedWindow->m_workspace != SELECTED_ORIGINAL_WORKSPACE) {
+    if (replaceInitial && initialFocusedWindow && initialFocusedWindow != window && initialFocusedWindow->m_isMapped && initialFocusedWindow->m_workspace && SELECTED_ORIGINAL_WORKSPACE &&
+        initialFocusedWindow->m_workspace != SELECTED_ORIGINAL_WORKSPACE) {
         g_pCompositor->moveWindowToWorkspaceSafe(initialFocusedWindow, SELECTED_ORIGINAL_WORKSPACE);
         initialFocusedWindow->m_workspace = SELECTED_ORIGINAL_WORKSPACE;
     }
@@ -690,19 +990,31 @@ void CWindowOverview::focusWindow(PHLWINDOW window, bool bring, bool replaceInit
     g_pCompositor->warpCursorTo(window->middle());
 }
 
+void CWindowOverview::finishClose() {
+    const auto MONITOR = pMonitor.lock();
+
+    g_pWindowOverview.reset();
+
+    if (MONITOR)
+        g_pHyprRenderer->damageMonitor(MONITOR);
+}
+
 void CWindowOverview::close(bool focusSelection, bool bringSelection, bool replaceInitialSelection) {
     if (closing)
         return;
 
     closing = true;
+    animationStartedAt = Time::steadyNow();
 
     PHLWINDOW selectedWindow;
     if (focusSelection && selectedIndex >= 0 && selectedIndex < (int)previews.size())
         selectedWindow = previews[selectedIndex].window;
 
-    damage();
-    g_pWindowOverview.reset();
-
     if (selectedWindow)
         focusWindow(selectedWindow, bringSelection, replaceInitialSelection);
+
+    damage();
+
+    if (animationComplete())
+        finishClose();
 }
