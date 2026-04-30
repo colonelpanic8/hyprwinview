@@ -9,6 +9,7 @@ The current version is a first working foundation:
 - sizes the grid from window count and monitor aspect ratio
 - focuses the hovered window
 - can bring the hovered window to the current workspace before focusing it
+- supports keyboard navigation while the overview is active
 
 ## Build
 
@@ -56,9 +57,19 @@ plugin {
         border_col = rgba(ffffff33)
         hover_border_col = rgba(66ccffee)
         border_size = 3
+        keys_left = a,h,left
+        keys_right = d,l,right
+        keys_up = w,k,up
+        keys_down = s,j,down
+        keys_go = return,enter,space,g
+        keys_bring = b,shift+return,shift+space
+        keys_close = escape,q
     }
 }
 ```
+
+Keyboard key sets are comma-separated. Modifiers can be written with `+`, for
+example `shift+return`.
 
 ## Dispatchers
 

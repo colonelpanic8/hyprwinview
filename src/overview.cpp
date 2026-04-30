@@ -2,7 +2,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cctype>
 #include <sstream>
+#include <string>
 
 #define private public
 #define protected public
@@ -12,10 +14,13 @@
 #include <hyprland/src/desktop/view/Window.hpp>
 #include <hyprland/src/helpers/time/Time.hpp>
 #include <hyprland/src/managers/input/InputManager.hpp>
+#include <hyprland/src/managers/SeatManager.hpp>
 #include <hyprland/src/render/OpenGL.hpp>
 #include <hyprland/src/render/Renderer.hpp>
 #undef private
 #undef protected
+
+#include <xkbcommon/xkbcommon.h>
 
 #include "WinviewPassElement.hpp"
 #include "globals.hpp"
@@ -50,8 +55,138 @@ static const CConfigValue<Config::INTEGER>& PBORDERSIZE() {
     return VALUE;
 }
 
+static const CConfigValue<Config::STRING>& PKEYSLEFT() {
+    static const CConfigValue<Config::STRING> VALUE("plugin:hyprwinview:keys_left");
+    return VALUE;
+}
+
+static const CConfigValue<Config::STRING>& PKEYSRIGHT() {
+    static const CConfigValue<Config::STRING> VALUE("plugin:hyprwinview:keys_right");
+    return VALUE;
+}
+
+static const CConfigValue<Config::STRING>& PKEYSUP() {
+    static const CConfigValue<Config::STRING> VALUE("plugin:hyprwinview:keys_up");
+    return VALUE;
+}
+
+static const CConfigValue<Config::STRING>& PKEYSDOWN() {
+    static const CConfigValue<Config::STRING> VALUE("plugin:hyprwinview:keys_down");
+    return VALUE;
+}
+
+static const CConfigValue<Config::STRING>& PKEYSGO() {
+    static const CConfigValue<Config::STRING> VALUE("plugin:hyprwinview:keys_go");
+    return VALUE;
+}
+
+static const CConfigValue<Config::STRING>& PKEYSBRING() {
+    static const CConfigValue<Config::STRING> VALUE("plugin:hyprwinview:keys_bring");
+    return VALUE;
+}
+
+static const CConfigValue<Config::STRING>& PKEYSCLOSE() {
+    static const CConfigValue<Config::STRING> VALUE("plugin:hyprwinview:keys_close");
+    return VALUE;
+}
+
 static uint32_t framebufferFormatWithAlpha(uint32_t drmFormat) {
     return DRM_FORMAT_ABGR8888;
+}
+
+static std::string trimmedLower(std::string token) {
+    auto notSpace = [](unsigned char c) { return !std::isspace(c); };
+    token.erase(token.begin(), std::ranges::find_if(token, notSpace));
+    token.erase(std::ranges::find_if(token.rbegin(), token.rend(), notSpace).base(), token.end());
+    std::ranges::transform(token, token.begin(), [](unsigned char c) { return std::tolower(c); });
+    return token;
+}
+
+static std::vector<std::string> keyTokens(const std::string& keys) {
+    std::vector<std::string> result;
+    std::stringstream        stream(keys);
+    std::string              token;
+
+    while (std::getline(stream, token, ',')) {
+        token = trimmedLower(token);
+        if (!token.empty())
+            result.push_back(token);
+    }
+
+    return result;
+}
+
+static std::string normalizeKeyName(std::string key) {
+    key = trimmedLower(key);
+
+    if (key == "enter")
+        return "return";
+    if (key == "esc")
+        return "escape";
+    if (key == "arrowleft")
+        return "left";
+    if (key == "arrowright")
+        return "right";
+    if (key == "arrowup")
+        return "up";
+    if (key == "arrowdown")
+        return "down";
+
+    return key;
+}
+
+static xkb_keysym_t keysymForName(const std::string& key) {
+    const auto NORMALIZED = normalizeKeyName(key);
+
+    if (NORMALIZED == "left")
+        return XKB_KEY_Left;
+    if (NORMALIZED == "right")
+        return XKB_KEY_Right;
+    if (NORMALIZED == "up")
+        return XKB_KEY_Up;
+    if (NORMALIZED == "down")
+        return XKB_KEY_Down;
+    if (NORMALIZED == "return")
+        return XKB_KEY_Return;
+    if (NORMALIZED == "space")
+        return XKB_KEY_space;
+    if (NORMALIZED == "escape")
+        return XKB_KEY_Escape;
+
+    return xkb_keysym_from_name(NORMALIZED.c_str(), XKB_KEYSYM_CASE_INSENSITIVE);
+}
+
+static bool tokenMatchesKey(const std::string& token, xkb_keysym_t keysym, uint32_t mods) {
+    std::stringstream stream(token);
+    std::string       part;
+    uint32_t          requiredMods = 0;
+    xkb_keysym_t      requiredKey  = XKB_KEY_NoSymbol;
+
+    while (std::getline(stream, part, '+')) {
+        part = normalizeKeyName(part);
+
+        if (part == "shift")
+            requiredMods |= HL_MODIFIER_SHIFT;
+        else if (part == "ctrl" || part == "control")
+            requiredMods |= HL_MODIFIER_CTRL;
+        else if (part == "alt")
+            requiredMods |= HL_MODIFIER_ALT;
+        else if (part == "super" || part == "mod" || part == "meta")
+            requiredMods |= HL_MODIFIER_META;
+        else
+            requiredKey = keysymForName(part);
+    }
+
+    return requiredKey != XKB_KEY_NoSymbol && xkb_keysym_to_lower(requiredKey) == xkb_keysym_to_lower(keysym) && (mods & requiredMods) == requiredMods;
+}
+
+static bool matchesKeySet(const CConfigValue<Config::STRING>& keys, xkb_keysym_t keysym, uint32_t mods) {
+    for (const auto& token : keyTokens(*keys)) {
+        if (tokenMatchesKey(token, keysym, mods))
+            return true;
+    }
+
+    return false;
 }
 
 static bool previewableWindow(const PHLWINDOW& window) {
@@ -70,6 +205,9 @@ CWindowOverview::CWindowOverview(PHLMONITOR monitor) : pMonitor(monitor) {
     renderSnapshots();
 
     lastMousePosLocal = g_pInputManager->getMouseCoordsInternal() - pMonitor->m_position;
+    selectedIndex     = hoveredIndex();
+    if (selectedIndex < 0 && !previews.empty())
+        selectedIndex = 0;
 
     auto onCursorMove = [this](Event::SCallbackInfo& info) {
         if (closing)
@@ -77,6 +215,9 @@ CWindowOverview::CWindowOverview(PHLMONITOR monitor) : pMonitor(monitor) {
 
         info.cancelled    = true;
         lastMousePosLocal = g_pInputManager->getMouseCoordsInternal() - pMonitor->m_position;
+        const auto HOVERED = hoveredIndex();
+        if (HOVERED >= 0)
+            selectedIndex = HOVERED;
         damage();
     };
 
@@ -89,10 +230,19 @@ CWindowOverview::CWindowOverview(PHLMONITOR monitor) : pMonitor(monitor) {
         close(true);
     };
 
+    auto onKeyboardKey = [this](const IKeyboard::SKeyEvent& event, Event::SCallbackInfo& info) {
+        if (closing)
+            return;
+
+        if (handleKey(event))
+            info.cancelled = true;
+    };
+
     mouseMoveHook   = Event::bus()->m_events.input.mouse.move.listen([onCursorMove](Vector2D, Event::SCallbackInfo& info) { onCursorMove(info); });
     touchMoveHook   = Event::bus()->m_events.input.touch.motion.listen([onCursorMove](ITouch::SMotionEvent, Event::SCallbackInfo& info) { onCursorMove(info); });
     mouseButtonHook = Event::bus()->m_events.input.mouse.button.listen([onCursorSelect](IPointer::SButtonEvent, Event::SCallbackInfo& info) { onCursorSelect(info); });
     touchDownHook   = Event::bus()->m_events.input.touch.down.listen([onCursorSelect](ITouch::SDownEvent, Event::SCallbackInfo& info) { onCursorSelect(info); });
+    keyboardHook    = Event::bus()->m_events.input.keyboard.key.listen([onKeyboardKey](IKeyboard::SKeyEvent event, Event::SCallbackInfo& info) { onKeyboardKey(event, info); });
 
     damage();
 }
@@ -131,6 +281,7 @@ void CWindowOverview::updateLayout() {
         cols--;
 
     rows = std::max(1, (int)std::ceil(count / cols));
+    gridCols = cols;
 
     const double margin = std::max<Config::INTEGER>(0, *PMARGIN());
     const double gap    = std::max<Config::INTEGER>(0, *PGAP());
@@ -199,7 +350,7 @@ void CWindowOverview::draw() {
         return;
 
     const auto SCALE       = pMonitor->m_scale;
-    const auto HOVERED    = hoveredIndex();
+    const auto HOVERED    = selectedIndex;
     const int  BORDER     = std::max<Config::INTEGER>(0, *PBORDERSIZE());
     CRegion    fullDamage = {0, 0, INT16_MAX, INT16_MAX};
 
@@ -236,6 +387,70 @@ void CWindowOverview::damage() {
 
 void CWindowOverview::selectHoveredWindow() {
     selectedIndex = hoveredIndex();
+}
+
+void CWindowOverview::moveSelection(int dx, int dy) {
+    if (previews.empty())
+        return;
+
+    if (selectedIndex < 0 || selectedIndex >= (int)previews.size())
+        selectedIndex = 0;
+
+    const int col    = selectedIndex % gridCols;
+    const int row    = selectedIndex / gridCols;
+    const int newCol = std::clamp(col + dx, 0, gridCols - 1);
+    const int maxRow = (previews.size() - 1) / gridCols;
+    const int newRow = std::clamp(row + dy, 0, maxRow);
+    int       next   = newRow * gridCols + newCol;
+
+    if (next >= (int)previews.size())
+        next = previews.size() - 1;
+
+    if (next != selectedIndex) {
+        selectedIndex     = next;
+        lastMousePosLocal = previews[selectedIndex].tileLogical.middle();
+        damage();
+    }
+}
+
+void CWindowOverview::runSelected(bool bring) {
+    close(true, bring);
+}
+
+bool CWindowOverview::handleKey(const IKeyboard::SKeyEvent& event) {
+    const auto KEYBOARD = g_pSeatManager && !g_pSeatManager->m_keyboard.expired() ? g_pSeatManager->m_keyboard.lock() : nullptr;
+    if (!KEYBOARD || !KEYBOARD->m_xkbState)
+        return false;
+
+    const auto KEYCODE = event.keycode + 8;
+    const auto KEYSYM  = xkb_state_key_get_one_sym(KEYBOARD->m_xkbState, KEYCODE);
+    const auto MODS    = g_pInputManager->getModsFromAllKBs();
+
+    const bool RECOGNIZED = matchesKeySet(PKEYSLEFT(), KEYSYM, MODS) || matchesKeySet(PKEYSRIGHT(), KEYSYM, MODS) || matchesKeySet(PKEYSUP(), KEYSYM, MODS) ||
+        matchesKeySet(PKEYSDOWN(), KEYSYM, MODS) || matchesKeySet(PKEYSGO(), KEYSYM, MODS) || matchesKeySet(PKEYSBRING(), KEYSYM, MODS) || matchesKeySet(PKEYSCLOSE(), KEYSYM, MODS);
+
+    if (!RECOGNIZED)
+        return false;
+
+    if (event.state != WL_KEYBOARD_KEY_STATE_PRESSED)
+        return true;
+
+    if (matchesKeySet(PKEYSLEFT(), KEYSYM, MODS))
+        moveSelection(-1, 0);
+    else if (matchesKeySet(PKEYSRIGHT(), KEYSYM, MODS))
+        moveSelection(1, 0);
+    else if (matchesKeySet(PKEYSUP(), KEYSYM, MODS))
+        moveSelection(0, -1);
+    else if (matchesKeySet(PKEYSDOWN(), KEYSYM, MODS))
+        moveSelection(0, 1);
+    else if (matchesKeySet(PKEYSBRING(), KEYSYM, MODS))
+        runSelected(true);
+    else if (matchesKeySet(PKEYSGO(), KEYSYM, MODS))
+        runSelected(false);
+    else if (matchesKeySet(PKEYSCLOSE(), KEYSYM, MODS))
+        close(false);
+
+    return true;
 }
 
 void CWindowOverview::focusWindow(PHLWINDOW window, bool bring) {
