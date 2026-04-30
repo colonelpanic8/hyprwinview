@@ -28,7 +28,7 @@ CRegion CWinviewPassElement::opaqueRegion() {
     if (!g_pWindowOverview || !g_pWindowOverview->pMonitor)
         return {};
 
-    if (!g_pWindowOverview->backgroundOpaque())
+    if (!g_pWindowOverview->occludesScene())
         return {};
 
     return CBox{{0, 0}, g_pWindowOverview->pMonitor->m_size};

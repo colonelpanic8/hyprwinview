@@ -4,6 +4,7 @@
 #include <cctype>
 #include <chrono>
 #include <cmath>
+#include <exception>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -199,6 +200,11 @@ static const CConfigValue<Config::FLOAT>& PANIMATIONSCALE() {
     return VALUE;
 }
 
+static const CConfigValue<Config::FLOAT>& PANIMATIONSPEED() {
+    static const CConfigValue<Config::FLOAT> VALUE("plugin:hyprwinview:animation_speed");
+    return VALUE;
+}
+
 static const CConfigValue<Config::INTEGER>& PANIMATIONSTAGGERMS() {
     static const CConfigValue<Config::INTEGER> VALUE("plugin:hyprwinview:animation_stagger_ms");
     return VALUE;
@@ -354,16 +360,24 @@ static bool matchesKeySet(const std::vector<std::string>& keys, xkb_keysym_t key
     return false;
 }
 
+static std::string configStringOr(const CConfigValue<Config::STRING>& value, const std::string& fallback) {
+    try {
+        return *value;
+    } catch (...) {
+        return fallback;
+    }
+}
+
 static SWinviewKeyConfig keyConfigFromConfigValues() {
     return {
-        .left  = keyTokens(*PKEYSLEFT()),
-        .right = keyTokens(*PKEYSRIGHT()),
-        .up    = keyTokens(*PKEYSUP()),
-        .down  = keyTokens(*PKEYSDOWN()),
-        .go    = keyTokens(*PKEYSGO()),
-        .bring = keyTokens(*PKEYSBRING()),
-        .bringReplace = keyTokens(*PKEYSBRINGREPLACE()),
-        .close = keyTokens(*PKEYSCLOSE()),
+        .left  = keyTokens(configStringOr(PKEYSLEFT(), "a,h,left")),
+        .right = keyTokens(configStringOr(PKEYSRIGHT(), "d,l,right")),
+        .up    = keyTokens(configStringOr(PKEYSUP(), "w,k,up")),
+        .down  = keyTokens(configStringOr(PKEYSDOWN(), "s,j,down")),
+        .go    = keyTokens(configStringOr(PKEYSGO(), "return,enter,space,g,f")),
+        .bring = keyTokens(configStringOr(PKEYSBRING(), "b,shift+return,shift+space")),
+        .bringReplace = keyTokens(configStringOr(PKEYSBRINGREPLACE(), "shift+b")),
+        .close = keyTokens(configStringOr(PKEYSCLOSE(), "escape,q")),
     };
 }
 
@@ -409,7 +423,7 @@ static const SWindowOrderingStrategy& applicationOrderStrategy() {
 }
 
 static const SWindowOrderingStrategy& activeWindowOrderingStrategy() {
-    const auto NAME = trimmedLower(*PWINDOWORDER());
+    const auto NAME = trimmedLower(configStringOr(PWINDOWORDER(), "natural"));
 
     if (NAME.empty() || NAME == "none" || NAME == "natural" || NAME == "compositor")
         return naturalOrderStrategy();
@@ -421,7 +435,7 @@ static const SWindowOrderingStrategy& activeWindowOrderingStrategy() {
 }
 
 static EOverviewAnimation overviewAnimation() {
-    const auto NAME = trimmedLower(*PANIMATION());
+    const auto NAME = trimmedLower(configStringOr(PANIMATION(), "fade_scale"));
 
     if (NAME == "none" || NAME == "off" || NAME == "disable" || NAME == "disabled")
         return EOverviewAnimation::NONE;
@@ -452,7 +466,8 @@ static double workspaceZoomStageRatio() {
 }
 
 static double animationDurationMs(bool closing) {
-    return std::max<Config::INTEGER>(0, closing ? *PANIMATIONOUTMS() : *PANIMATIONINMS());
+    const double SPEED = std::clamp<double>(*PANIMATIONSPEED(), 0.1, 10.0);
+    return std::max<Config::INTEGER>(0, closing ? *PANIMATIONOUTMS() : *PANIMATIONINMS()) / SPEED;
 }
 
 static double easeOutCubic(double t) {
@@ -566,7 +581,7 @@ static double edgeSignedMargin(double anchor, double absolute, double relative, 
 
 static CBox appIconBoxForTile(const CBox& tileLogical, double scale) {
     const int  SIZE = std::max<Config::INTEGER>(1, *PAPPICONSIZE());
-    Vector2D   anchor = iconAnchorFromPosition(*PAPPICONPOSITION());
+    Vector2D   anchor = iconAnchorFromPosition(configStringOr(PAPPICONPOSITION(), "bottom right"));
     anchor.x          = anchorOverride(*PAPPICONANCHORX(), anchor.x);
     anchor.y          = anchorOverride(*PAPPICONANCHORY(), anchor.y);
 
@@ -1060,7 +1075,7 @@ bool CWindowOverview::backgroundBlurEnabled() const {
     return *PBACKGROUNDBLUR() != 0;
 }
 
-bool CWindowOverview::backgroundOpaque() const {
+bool CWindowOverview::occludesScene() const {
     return !isAnimating() && activeBackgroundColor().a >= 1.0;
 }
 

@@ -39,7 +39,7 @@ class CWindowOverview {
     void selectHoveredWindow();
     bool isAnimating() const;
     bool backgroundBlurEnabled() const;
-    bool backgroundOpaque() const;
+    bool occludesScene() const;
 
     PHLMONITORREF pMonitor;
 

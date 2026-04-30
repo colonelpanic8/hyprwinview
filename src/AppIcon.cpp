@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
+#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <limits>
@@ -83,6 +84,14 @@ namespace {
     const CConfigValue<Config::STRING>& PAPPICONOVERRIDES() {
         static const CConfigValue<Config::STRING> VALUE("plugin:hyprwinview:app_icon_overrides");
         return VALUE;
+    }
+
+    std::string configStringOr(const CConfigValue<Config::STRING>& value, const std::string& fallback) {
+        try {
+            return *value;
+        } catch (...) {
+            return fallback;
+        }
     }
 
     std::string trim(std::string value) {
@@ -605,24 +614,24 @@ namespace {
     }
 
     bool themeLookupDisabled() {
-        if (!(*PAPPICONTHEME()).empty())
+        if (!configStringOr(PAPPICONTHEME(), "").empty())
             return false;
 
-        const std::string SOURCE = lowercase(*PAPPICONTHEMESOURCE());
+        const std::string SOURCE = lowercase(configStringOr(PAPPICONTHEMESOURCE(), "auto"));
         return SOURCE == "none" || SOURCE == "legacy";
     }
 
     std::vector<std::string> configuredThemeNames() {
         std::vector<std::string> themes;
 
-        appendUnique(themes, *PAPPICONTHEME());
+        appendUnique(themes, configStringOr(PAPPICONTHEME(), ""));
         if (!themes.empty())
             return themes;
 
         if (themeLookupDisabled())
             return themes;
 
-        const std::string SOURCE = lowercase(*PAPPICONTHEMESOURCE());
+        const std::string SOURCE = lowercase(configStringOr(PAPPICONTHEMESOURCE(), "auto"));
         if (SOURCE == "gtk") {
             appendUnique(themes, gtkIconThemeName());
             return themes;
@@ -703,7 +712,8 @@ namespace {
             return std::nullopt;
 
         const auto THEMES    = configuredThemeNames();
-        const auto CACHE_KEY = iconName + ":" + std::to_string(sizePx) + ":" + *PAPPICONTHEME() + ":" + *PAPPICONTHEMESOURCE() + ":" + themeCacheKeyPart(THEMES);
+        const auto CACHE_KEY = iconName + ":" + std::to_string(sizePx) + ":" + configStringOr(PAPPICONTHEME(), "") + ":" + configStringOr(PAPPICONTHEMESOURCE(), "auto") + ":" +
+            themeCacheKeyPart(THEMES);
         if (const auto IT = g_iconPathCache.find(CACHE_KEY); IT != g_iconPathCache.end())
             return IT->second;
 
@@ -812,7 +822,7 @@ namespace {
 
     std::optional<std::string> iconOverrideForAppId(const std::string& appId) {
         const auto KEY = lowercase(appId);
-        for (const auto& entry : splitList(*PAPPICONOVERRIDES(), ',')) {
+        for (const auto& entry : splitList(configStringOr(PAPPICONOVERRIDES(), ""), ',')) {
             const auto EQUAL = entry.find('=');
             if (EQUAL == std::string::npos)
                 continue;
