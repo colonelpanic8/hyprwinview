@@ -15,6 +15,7 @@ struct SWinviewKeyConfig {
     std::vector<std::string> down;
     std::vector<std::string> go;
     std::vector<std::string> bring;
+    std::vector<std::string> bringReplace;
     std::vector<std::string> close;
 };
 
@@ -29,7 +30,7 @@ class CWindowOverview {
     void render();
     void draw();
     void damage();
-    void close(bool focusSelection = false, bool bringSelection = false);
+    void close(bool focusSelection = false, bool bringSelection = false, bool replaceInitialSelection = false);
     void selectHoveredWindow();
 
     PHLMONITORREF pMonitor;
@@ -45,12 +46,14 @@ class CWindowOverview {
     void                  renderSnapshots();
     void                  updateLayout();
     int                   hoveredIndex() const;
-    void                  focusWindow(PHLWINDOW window, bool bring);
+    void                  focusWindow(PHLWINDOW window, bool bring, bool replaceInitial);
     void                  moveSelection(int dx, int dy);
-    void                  runSelected(bool bring);
+    void                  runSelected(bool bring, bool replaceInitial = false);
     bool                  handleKey(const IKeyboard::SKeyEvent& event);
 
     std::vector<SWindowPreview> previews;
+    PHLWINDOW                   initialFocusedWindow;
+    PHLWORKSPACE                initialFocusedWorkspace;
     Vector2D                    lastMousePosLocal;
     int                         selectedIndex = -1;
     int                         gridCols      = 1;

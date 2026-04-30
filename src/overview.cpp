@@ -88,6 +88,11 @@ static const CConfigValue<Config::STRING>& PKEYSBRING() {
     return VALUE;
 }
 
+static const CConfigValue<Config::STRING>& PKEYSBRINGREPLACE() {
+    static const CConfigValue<Config::STRING> VALUE("plugin:hyprwinview:keys_bring_replace");
+    return VALUE;
+}
+
 static const CConfigValue<Config::STRING>& PKEYSCLOSE() {
     static const CConfigValue<Config::STRING> VALUE("plugin:hyprwinview:keys_close");
     return VALUE;
@@ -168,6 +173,7 @@ SWinviewKeyConfig defaultWinviewKeyConfig() {
         .down  = {"s", "j", "down"},
         .go    = {"return", "enter", "space", "g"},
         .bring = {"b", "shift+return", "shift+space"},
+        .bringReplace = {"shift+b"},
         .close = {"escape", "q"},
     };
 }
@@ -263,7 +269,9 @@ static bool tokenMatchesKey(const std::string& token, xkb_keysym_t keysym, uint3
             requiredKey = keysymForName(part);
     }
 
-    return requiredKey != XKB_KEY_NoSymbol && xkb_keysym_to_lower(requiredKey) == xkb_keysym_to_lower(keysym) && (mods & requiredMods) == requiredMods;
+    constexpr uint32_t HANDLED_MODS = HL_MODIFIER_SHIFT | HL_MODIFIER_CTRL | HL_MODIFIER_ALT | HL_MODIFIER_META;
+
+    return requiredKey != XKB_KEY_NoSymbol && xkb_keysym_to_lower(requiredKey) == xkb_keysym_to_lower(keysym) && (mods & HANDLED_MODS) == requiredMods;
 }
 
 static bool matchesKeySet(const std::vector<std::string>& keys, xkb_keysym_t keysym, uint32_t mods) {
@@ -283,6 +291,7 @@ static SWinviewKeyConfig keyConfigFromConfigValues() {
         .down  = keyTokens(*PKEYSDOWN()),
         .go    = keyTokens(*PKEYSGO()),
         .bring = keyTokens(*PKEYSBRING()),
+        .bringReplace = keyTokens(*PKEYSBRINGREPLACE()),
         .close = keyTokens(*PKEYSCLOSE()),
     };
 }
@@ -377,6 +386,9 @@ static bool previewableWindow(const PHLWINDOW& window) {
 }
 
 CWindowOverview::CWindowOverview(PHLMONITOR monitor) : pMonitor(monitor) {
+    initialFocusedWindow    = Desktop::focusState()->window();
+    initialFocusedWorkspace = initialFocusedWindow && initialFocusedWindow->m_workspace ? initialFocusedWindow->m_workspace : (pMonitor ? pMonitor->m_activeWorkspace : nullptr);
+
     collectWindows();
     updateLayout();
     renderSnapshots();
@@ -500,12 +512,16 @@ void CWindowOverview::renderSnapshots() {
         }
 
         CRegion fakeDamage{0, 0, (int)pMonitor->m_transformedSize.x, (int)pMonitor->m_transformedSize.y};
-        g_pHyprRenderer->beginFullFakeRender(pMonitor.lock(), fakeDamage, preview.fb);
-        glClearColor(0.F, 0.F, 0.F, 0.F);
-        glClear(GL_COLOR_BUFFER_BIT);
+        if (!g_pHyprRenderer->beginFullFakeRender(pMonitor.lock(), fakeDamage, preview.fb))
+            continue;
+
+        g_pHyprRenderer->m_bRenderingSnapshot = true;
+        g_pHyprRenderer->draw(CClearPassElement::SClearData{CHyprColor(0, 0, 0, 0)});
+        g_pHyprRenderer->startRenderPass();
         g_pHyprRenderer->renderWindow(preview.window, pMonitor.lock(), Time::steadyNow(), false, Render::RENDER_PASS_ALL, true, true);
         g_pHyprRenderer->m_renderData.blockScreenShader = true;
         g_pHyprRenderer->endRender();
+        g_pHyprRenderer->m_bRenderingSnapshot = false;
     }
 }
 
@@ -603,8 +619,8 @@ void CWindowOverview::moveSelection(int dx, int dy) {
     }
 }
 
-void CWindowOverview::runSelected(bool bring) {
-    close(true, bring);
+void CWindowOverview::runSelected(bool bring, bool replaceInitial) {
+    close(true, bring, replaceInitial);
 }
 
 bool CWindowOverview::handleKey(const IKeyboard::SKeyEvent& event) {
@@ -618,7 +634,8 @@ bool CWindowOverview::handleKey(const IKeyboard::SKeyEvent& event) {
     const auto KEYS    = activeKeyConfig();
 
     const bool RECOGNIZED = matchesKeySet(KEYS.left, KEYSYM, MODS) || matchesKeySet(KEYS.right, KEYSYM, MODS) || matchesKeySet(KEYS.up, KEYSYM, MODS) ||
-        matchesKeySet(KEYS.down, KEYSYM, MODS) || matchesKeySet(KEYS.go, KEYSYM, MODS) || matchesKeySet(KEYS.bring, KEYSYM, MODS) || matchesKeySet(KEYS.close, KEYSYM, MODS);
+        matchesKeySet(KEYS.down, KEYSYM, MODS) || matchesKeySet(KEYS.go, KEYSYM, MODS) || matchesKeySet(KEYS.bring, KEYSYM, MODS) ||
+        matchesKeySet(KEYS.bringReplace, KEYSYM, MODS) || matchesKeySet(KEYS.close, KEYSYM, MODS);
 
     if (!RECOGNIZED)
         return false;
@@ -634,6 +651,8 @@ bool CWindowOverview::handleKey(const IKeyboard::SKeyEvent& event) {
         moveSelection(0, -1);
     else if (matchesKeySet(KEYS.down, KEYSYM, MODS))
         moveSelection(0, 1);
+    else if (matchesKeySet(KEYS.bringReplace, KEYSYM, MODS))
+        runSelected(true, true);
     else if (matchesKeySet(KEYS.bring, KEYSYM, MODS))
         runSelected(true);
     else if (matchesKeySet(KEYS.go, KEYSYM, MODS))
@@ -644,16 +663,24 @@ bool CWindowOverview::handleKey(const IKeyboard::SKeyEvent& event) {
     return true;
 }
 
-void CWindowOverview::focusWindow(PHLWINDOW window, bool bring) {
+void CWindowOverview::focusWindow(PHLWINDOW window, bool bring, bool replaceInitial) {
     if (!window || !window->m_workspace)
         return;
 
     const auto FOCUSSTATE = Desktop::focusState();
     const auto MONITOR    = FOCUSSTATE->monitor();
+    const auto TARGET_WORKSPACE            = replaceInitial && initialFocusedWorkspace ? initialFocusedWorkspace : (MONITOR ? MONITOR->m_activeWorkspace : nullptr);
+    const auto SELECTED_ORIGINAL_WORKSPACE = window->m_workspace;
 
-    if (bring && MONITOR && MONITOR->m_activeWorkspace && window->m_workspace != MONITOR->m_activeWorkspace) {
-        g_pCompositor->moveWindowToWorkspaceSafe(window, MONITOR->m_activeWorkspace);
-        window->m_workspace = MONITOR->m_activeWorkspace;
+    if (replaceInitial && initialFocusedWindow && initialFocusedWindow != window && initialFocusedWindow->m_isMapped && initialFocusedWindow->m_workspace &&
+        SELECTED_ORIGINAL_WORKSPACE && initialFocusedWindow->m_workspace != SELECTED_ORIGINAL_WORKSPACE) {
+        g_pCompositor->moveWindowToWorkspaceSafe(initialFocusedWindow, SELECTED_ORIGINAL_WORKSPACE);
+        initialFocusedWindow->m_workspace = SELECTED_ORIGINAL_WORKSPACE;
+    }
+
+    if ((bring || replaceInitial) && TARGET_WORKSPACE && window->m_workspace != TARGET_WORKSPACE) {
+        g_pCompositor->moveWindowToWorkspaceSafe(window, TARGET_WORKSPACE);
+        window->m_workspace = TARGET_WORKSPACE;
     }
 
     if (MONITOR && MONITOR->m_activeWorkspace != window->m_workspace)
@@ -663,7 +690,7 @@ void CWindowOverview::focusWindow(PHLWINDOW window, bool bring) {
     g_pCompositor->warpCursorTo(window->middle());
 }
 
-void CWindowOverview::close(bool focusSelection, bool bringSelection) {
+void CWindowOverview::close(bool focusSelection, bool bringSelection, bool replaceInitialSelection) {
     if (closing)
         return;
 
@@ -677,5 +704,5 @@ void CWindowOverview::close(bool focusSelection, bool bringSelection) {
     g_pWindowOverview.reset();
 
     if (selectedWindow)
-        focusWindow(selectedWindow, bringSelection);
+        focusWindow(selectedWindow, bringSelection, replaceInitialSelection);
 }

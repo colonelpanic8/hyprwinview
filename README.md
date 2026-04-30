@@ -86,6 +86,7 @@ hl.plugin.hyprwinview.configure({
         down = { "s", "j", "down" },
         go = { "return", "enter", "space", "g" },
         bring = { "b", "shift+return", "shift+space" },
+        bring_replace = { "shift + b" },
         close = { "escape", "q" },
     },
 })
@@ -93,8 +94,10 @@ hl.plugin.hyprwinview.configure({
 
 Keyboard key sets are Lua arrays when configuring through
 `hl.plugin.hyprwinview.configure`. Modifiers can be written with `+`, for
-example `shift+return`. The scalar `keys_*` plugin options still work as a
-fallback for hyprlang-style configuration.
+example `shift+return` or `shift + b`. Modifier matching is exact for Shift,
+Ctrl, Alt, and Super, so `b` and `shift + b` can trigger different actions. The
+scalar `keys_*` plugin options still work as a fallback for hyprlang-style
+configuration.
 
 `app_icon_position` accepts `left`, `right`, `top`, `bottom`, and `center`,
 including combinations like `top left` or `bottom right`; single edges like
@@ -121,5 +124,10 @@ On Hyprland 0.54 and older hyprlang configs, the same options live under
 hyprwinview:overview toggle
 hyprwinview:overview select
 hyprwinview:overview bring
+hyprwinview:overview bring-replace
 hyprwinview:overview close
 ```
+
+`bring-replace` swaps the selected window with the window that was focused when
+the overview opened, then focuses the selected window. If that original focused
+window no longer exists, it falls back to normal bring behavior.

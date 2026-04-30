@@ -58,6 +58,14 @@ static SDispatchResult onWinviewDispatcher(std::string arg) {
         return {};
     }
 
+    if (arg == "bring-replace" || arg == "bring_replace" || arg == "replace") {
+        if (g_pWindowOverview) {
+            g_pWindowOverview->selectHoveredWindow();
+            g_pWindowOverview->close(true, true, true);
+        }
+        return {};
+    }
+
     if (arg == "off" || arg == "close" || arg == "disable") {
         if (g_pWindowOverview)
             g_pWindowOverview->close(false);
@@ -119,6 +127,7 @@ static void readKeyTable(lua_State* L, int tableIdx, SWinviewKeyConfig& config) 
     config.down  = luaStringListField(L, tableIdx, "down", config.down);
     config.go    = luaStringListField(L, tableIdx, "go", config.go);
     config.bring = luaStringListField(L, tableIdx, "bring", config.bring);
+    config.bringReplace = luaStringListField(L, tableIdx, "bring_replace", config.bringReplace);
     config.close = luaStringListField(L, tableIdx, "close", config.close);
 
     config.left  = luaStringListField(L, tableIdx, "keys_left", config.left);
@@ -127,6 +136,7 @@ static void readKeyTable(lua_State* L, int tableIdx, SWinviewKeyConfig& config) 
     config.down  = luaStringListField(L, tableIdx, "keys_down", config.down);
     config.go    = luaStringListField(L, tableIdx, "keys_go", config.go);
     config.bring = luaStringListField(L, tableIdx, "keys_bring", config.bring);
+    config.bringReplace = luaStringListField(L, tableIdx, "keys_bring_replace", config.bringReplace);
     config.close = luaStringListField(L, tableIdx, "keys_close", config.close);
 }
 
@@ -172,6 +182,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprwinview:keys_down", "down keys", "s,j,down"));
     addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprwinview:keys_go", "go keys", "return,enter,space,g"));
     addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprwinview:keys_bring", "bring keys", "b,shift+return,shift+space"));
+    addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprwinview:keys_bring_replace", "bring replace keys", "shift+b"));
     addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprwinview:keys_close", "close keys", "escape,q"));
     addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprwinview:show_app_icon", "show app icon overlays", 0));
     addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprwinview:app_icon_size", "app icon size", 48));
