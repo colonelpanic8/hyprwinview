@@ -209,11 +209,22 @@ static const CConfigValue<Config::INTEGER>& PANIMATIONSTAGGERMAXMS() {
     return VALUE;
 }
 
+static const CConfigValue<Config::FLOAT>& PANIMATIONWORKSPACEZOOMSTAGERATIO() {
+    static const CConfigValue<Config::FLOAT> VALUE("plugin:hyprwinview:animation_workspace_zoom_stage_ratio");
+    return VALUE;
+}
+
+static const CConfigValue<Config::INTEGER>& PANIMATIONWORKSPACEZOOMGAP() {
+    static const CConfigValue<Config::INTEGER> VALUE("plugin:hyprwinview:animation_workspace_zoom_gap");
+    return VALUE;
+}
+
 enum class EOverviewAnimation {
     NONE,
     FADE,
     FADE_SCALE,
     STAGGERED_FADE_SCALE,
+    WORKSPACE_ZOOM,
 };
 
 struct SWindowOrderingStrategy {
@@ -418,6 +429,8 @@ static EOverviewAnimation overviewAnimation() {
         return EOverviewAnimation::FADE;
     if (NAME == "stagger" || NAME == "staggered" || NAME == "staggered_fade_scale")
         return EOverviewAnimation::STAGGERED_FADE_SCALE;
+    if (NAME == "workspace_zoom" || NAME == "workspace-zoom" || NAME == "expo" || NAME == "hyprexpo")
+        return EOverviewAnimation::WORKSPACE_ZOOM;
 
     return EOverviewAnimation::FADE_SCALE;
 }
@@ -428,6 +441,14 @@ static bool animationScalesTiles(EOverviewAnimation animation) {
 
 static bool animationStaggersTiles(EOverviewAnimation animation) {
     return animation == EOverviewAnimation::STAGGERED_FADE_SCALE;
+}
+
+static bool animationUsesWorkspaceZoom(EOverviewAnimation animation) {
+    return animation == EOverviewAnimation::WORKSPACE_ZOOM;
+}
+
+static double workspaceZoomStageRatio() {
+    return std::clamp<double>(*PANIMATIONWORKSPACEZOOMSTAGERATIO(), 0.1, 0.9);
 }
 
 static double animationDurationMs(bool closing) {
@@ -462,6 +483,19 @@ static CBox scaleBoxFromCenter(const CBox& box, double scale) {
 
 static CHyprColor multiplyAlpha(const CHyprColor& color, double alpha) {
     return color.modifyA(color.a * std::clamp(alpha, 0.0, 1.0));
+}
+
+static double lerpDouble(double from, double to, double progress) {
+    return from + (to - from) * std::clamp(progress, 0.0, 1.0);
+}
+
+static CBox lerpBox(const CBox& from, const CBox& to, double progress) {
+    return {
+        lerpDouble(from.x, to.x, progress),
+        lerpDouble(from.y, to.y, progress),
+        lerpDouble(from.w, to.w, progress),
+        lerpDouble(from.h, to.h, progress),
+    };
 }
 
 static CHyprColor activeBackgroundColor() {
@@ -775,8 +809,9 @@ void CWindowOverview::draw() {
             continue;
 
         const auto TILE_VISIBLE = tileAnimationVisibleAmount(i);
+        const auto TEXTURE_ALPHA = animatedTileTextureAlpha(i, TILE_VISIBLE);
         const auto TILE_SCALE   = animationScalesTiles(ANIMATION) ? BASE_SCALE + (1.0 - BASE_SCALE) * TILE_VISIBLE : 1.0;
-        CBox tilePx = scaleBoxFromCenter(preview.tileLogical, TILE_SCALE).scale(SCALE).round();
+        CBox tilePx = scaleBoxFromCenter(animatedTileLogicalBox(i, TILE_VISIBLE), TILE_SCALE).scale(SCALE).round();
         CBox texBox = {
             tilePx.x,
             tilePx.y,
@@ -790,7 +825,7 @@ void CWindowOverview::draw() {
         }
 
         g_pHyprRenderer->m_renderData.clipBox = tilePx;
-        Render::GL::g_pHyprOpenGL->renderTexture(preview.fb->getTexture(), texBox, {.damage = &fullDamage, .a = (float)TILE_VISIBLE, .round = BORDER * 2});
+        Render::GL::g_pHyprOpenGL->renderTexture(preview.fb->getTexture(), texBox, {.damage = &fullDamage, .a = (float)TEXTURE_ALPHA, .round = BORDER * 2});
         g_pHyprRenderer->m_renderData.clipBox = {};
 
         if (*PSHOWAPPICON() != 0) {
@@ -895,6 +930,112 @@ double CWindowOverview::maxTileAnimationDelayMs() const {
         return 0.0;
 
     return std::min<double>((previews.size() - 1) * STAGGER_MS, MAX_STAGGER_MS);
+}
+
+CBox CWindowOverview::workspacePanelCellLogical(int index) const {
+    if (!pMonitor)
+        return {};
+
+    index = std::clamp(index, 0, 8);
+
+    const double margin = std::max<Config::INTEGER>(0, *PMARGIN());
+    const double gap    = std::max<Config::INTEGER>(0, *PANIMATIONWORKSPACEZOOMGAP());
+    const double areaW  = std::max(1.0, pMonitor->m_size.x - margin * 2.0);
+    const double areaH  = std::max(1.0, pMonitor->m_size.y - margin * 2.0);
+    const double cellW  = std::max(1.0, (areaW - gap * 2.0) / 3.0);
+    const double cellH  = std::max(1.0, (areaH - gap * 2.0) / 3.0);
+    const int    col    = index % 3;
+    const int    row    = index / 3;
+
+    return {margin + col * (cellW + gap), margin + row * (cellH + gap), cellW, cellH};
+}
+
+CBox CWindowOverview::workspacePanelBoxForPreview(const SWindowPreview& preview) const {
+    if (!preview.window || !pMonitor)
+        return {};
+
+    const auto SOURCE_MONITOR = preview.window->m_monitor.lock() ? preview.window->m_monitor.lock() : pMonitor.lock();
+    if (!SOURCE_MONITOR)
+        return preview.tileLogical;
+
+    int panelIndex = 4;
+    if (preview.window->m_workspace) {
+        const auto ANCHOR_WORKSPACE = initialFocusedWorkspace ? initialFocusedWorkspace : (pMonitor ? pMonitor->m_activeWorkspace : nullptr);
+        if (ANCHOR_WORKSPACE && preview.window->m_workspace->m_id > 0 && ANCHOR_WORKSPACE->m_id > 0) {
+            const auto RELATIVE_WORKSPACE = (int)(preview.window->m_workspace->m_id - ANCHOR_WORKSPACE->m_id);
+            panelIndex                    = std::clamp(RELATIVE_WORKSPACE + 4, 0, 8);
+        }
+    }
+
+    const auto CELL       = workspacePanelCellLogical(panelIndex);
+    const auto WIN_POS    = preview.window->m_realPosition->value();
+    const auto WIN_SIZE   = preview.window->m_realSize->value();
+    const auto MONITOR_W  = std::max(1.0, SOURCE_MONITOR->m_size.x);
+    const auto MONITOR_H  = std::max(1.0, SOURCE_MONITOR->m_size.y);
+    const auto LOCAL_X    = (WIN_POS.x - SOURCE_MONITOR->m_position.x) / MONITOR_W;
+    const auto LOCAL_Y    = (WIN_POS.y - SOURCE_MONITOR->m_position.y) / MONITOR_H;
+    const auto LOCAL_W    = WIN_SIZE.x / MONITOR_W;
+    const auto LOCAL_H    = WIN_SIZE.y / MONITOR_H;
+
+    return {
+        CELL.x + LOCAL_X * CELL.w,
+        CELL.y + LOCAL_Y * CELL.h,
+        std::max(1.0, LOCAL_W * CELL.w),
+        std::max(1.0, LOCAL_H * CELL.h),
+    };
+}
+
+CBox CWindowOverview::workspaceZoomCameraBoxForPanelBox(const CBox& panelBox, double cameraProgress) const {
+    if (!pMonitor)
+        return panelBox;
+
+    const auto CENTER_CELL = workspacePanelCellLogical(4);
+    const auto PROGRESS    = std::clamp(cameraProgress, 0.0, 1.0);
+    const auto VIEWPORT    = CBox{0, 0, pMonitor->m_size.x, pMonitor->m_size.y};
+
+    const double startScaleX = VIEWPORT.w / std::max(1.0, CENTER_CELL.w);
+    const double startScaleY = VIEWPORT.h / std::max(1.0, CENTER_CELL.h);
+    const double startX      = VIEWPORT.x - CENTER_CELL.x * startScaleX;
+    const double startY      = VIEWPORT.y - CENTER_CELL.y * startScaleY;
+    const double scaleX      = lerpDouble(startScaleX, 1.0, PROGRESS);
+    const double scaleY      = lerpDouble(startScaleY, 1.0, PROGRESS);
+    const double x           = lerpDouble(startX, 0.0, PROGRESS);
+    const double y           = lerpDouble(startY, 0.0, PROGRESS);
+
+    return {
+        panelBox.x * scaleX + x,
+        panelBox.y * scaleY + y,
+        panelBox.w * scaleX,
+        panelBox.h * scaleY,
+    };
+}
+
+CBox CWindowOverview::animatedTileLogicalBox(size_t index, double progress) const {
+    if (index >= previews.size())
+        return {};
+
+    if (!animationUsesWorkspaceZoom(overviewAnimation()))
+        return previews[index].tileLogical;
+
+    const auto& PREVIEW = previews[index];
+    const auto  SPLIT   = workspaceZoomStageRatio();
+    const auto  PANEL   = workspacePanelBoxForPreview(PREVIEW);
+    const auto  FINAL   = PREVIEW.tileLogical;
+
+    if (progress <= SPLIT)
+        return workspaceZoomCameraBoxForPanelBox(PANEL, easeOutCubic(progress / SPLIT));
+
+    return lerpBox(PANEL, FINAL, easeOutCubic((progress - SPLIT) / (1.0 - SPLIT)));
+}
+
+double CWindowOverview::animatedTileTextureAlpha(size_t index, double progress) const {
+    if (index >= previews.size())
+        return 0.0;
+
+    if (!animationUsesWorkspaceZoom(overviewAnimation()))
+        return progress;
+
+    return 1.0;
 }
 
 bool CWindowOverview::animationComplete() const {

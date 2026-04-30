@@ -67,6 +67,11 @@ class CWindowOverview {
     double                tileAnimationVisibleAmount(size_t index) const;
     double                tileAnimationDelayMs(size_t index) const;
     double                maxTileAnimationDelayMs() const;
+    CBox                  workspacePanelCellLogical(int index) const;
+    CBox                  workspacePanelBoxForPreview(const SWindowPreview& preview) const;
+    CBox                  workspaceZoomCameraBoxForPanelBox(const CBox& panelBox, double cameraProgress) const;
+    CBox                  animatedTileLogicalBox(size_t index, double progress) const;
+    double                animatedTileTextureAlpha(size_t index, double progress) const;
     bool                  animationComplete() const;
 
     std::vector<SWindowPreview> previews;

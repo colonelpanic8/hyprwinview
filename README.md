@@ -77,12 +77,14 @@ hl.config({
             app_icon_offset_y = 0,
             app_icon_backplate_col = "rgba(00000066)",
             app_icon_backplate_padding = 6,
-            animation = "fade_scale",
+            animation = "workspace_zoom",
             animation_in_ms = 180,
             animation_out_ms = 140,
             animation_scale = 0.94,
             animation_stagger_ms = 16,
             animation_stagger_max_ms = 120,
+            animation_workspace_zoom_stage_ratio = 0.45,
+            animation_workspace_zoom_gap = 18,
         },
     },
 })
@@ -136,10 +138,17 @@ theme name, for example `Papirus-Dark`. Set `app_icon_overrides` to a
 comma-separated list of `app_id=icon` pairs, where `icon` can be a themed icon
 name or an absolute path.
 
-`animation` accepts `fade_scale`, `staggered`, `fade`, or `none`.
+`animation` accepts `fade_scale`, `staggered`, `workspace_zoom`, `fade`, or `none`.
 `animation_scale` is the starting tile scale for scale-based modes; it is
 clamped between `0.01` and `1.0`. `animation_stagger_ms` and
 `animation_stagger_max_ms` control the per-tile delay for `staggered`.
+`workspace_zoom` treats windows as living in a 3x3 workspace plane centered on
+the initially focused workspace. It starts with the camera zoomed into that
+center workspace, zooms out to reveal the workspace plane, then moves and
+resizes windows into the final overview grid. `animation_workspace_zoom_stage_ratio`
+controls how much of the duration is spent reaching the workspace-plane view
+before moving to the final grid, and `animation_workspace_zoom_gap` controls the
+spacing between workspace cells in that intermediate plane.
 
 On Hyprland 0.54 and older hyprlang configs, the same options live under
 `plugin { hyprwinview { ... } }`.

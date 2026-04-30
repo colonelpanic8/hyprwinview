@@ -322,12 +322,14 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprwinview:app_icon_offset_y", "app icon vertical offset", 0));
     addConfigValue(makeShared<Config::Values::CColorValue>("plugin:hyprwinview:app_icon_backplate_col", "app icon backplate color", 0x66000000));
     addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprwinview:app_icon_backplate_padding", "app icon backplate padding", 6));
-    addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprwinview:animation", "overview animation mode", "fade_scale"));
+    addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprwinview:animation", "overview animation mode", "workspace_zoom"));
     addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprwinview:animation_in_ms", "overview open animation duration in milliseconds", 180));
     addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprwinview:animation_out_ms", "overview close animation duration in milliseconds", 140));
     addConfigValue(makeShared<Config::Values::CFloatValue>("plugin:hyprwinview:animation_scale", "overview fade_scale starting scale", 0.94F));
     addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprwinview:animation_stagger_ms", "overview staggered animation delay between tiles in milliseconds", 16));
     addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprwinview:animation_stagger_max_ms", "overview staggered animation maximum tile delay in milliseconds", 120));
+    addConfigValue(makeShared<Config::Values::CFloatValue>("plugin:hyprwinview:animation_workspace_zoom_stage_ratio", "overview workspace_zoom first-stage fraction", 0.45F));
+    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprwinview:animation_workspace_zoom_gap", "overview workspace_zoom panel gap", 18));
 
     static auto renderStage = Event::bus()->m_events.render.stage.listen([](eRenderStage stage) {
         if (stage != RENDER_LAST_MOMENT || !g_pWindowOverview)
