@@ -91,8 +91,8 @@ static const CConfigValue<Config::STRING>& PKEYSCLOSE() {
     return VALUE;
 }
 
-static const CConfigValue<Config::BOOL>& PSHOWAPPICON() {
-    static const CConfigValue<Config::BOOL> VALUE("plugin:hyprwinview:show_app_icon");
+static const CConfigValue<Config::INTEGER>& PSHOWAPPICON() {
+    static const CConfigValue<Config::INTEGER> VALUE("plugin:hyprwinview:show_app_icon");
     return VALUE;
 }
 
@@ -519,7 +519,7 @@ void CWindowOverview::draw() {
         Render::GL::g_pHyprOpenGL->renderTexture(preview.fb->getTexture(), texBox, {.damage = &fullDamage, .a = 1.0, .round = BORDER * 2});
         g_pHyprRenderer->m_renderData.clipBox = {};
 
-        if (*PSHOWAPPICON()) {
+        if (*PSHOWAPPICON() != 0) {
             const int ICON_SIZE_PX = std::max(1, (int)std::round(std::max<Config::INTEGER>(1, *PAPPICONSIZE()) * SCALE));
             if (const auto ICON = appIconTextureForWindow(preview.window, ICON_SIZE_PX)) {
                 CBox       iconBox = appIconBoxForTile(preview.tileLogical, SCALE);

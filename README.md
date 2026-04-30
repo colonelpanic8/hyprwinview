@@ -65,7 +65,7 @@ hl.config({
             keys_go = "return,enter,space,g",
             keys_bring = "b,shift+return,shift+space",
             keys_close = "escape,q",
-            show_app_icon = true,
+            show_app_icon = 1,
             app_icon_size = 48,
             app_icon_position = "bottom right",
             app_icon_anchor_x = -1.0,

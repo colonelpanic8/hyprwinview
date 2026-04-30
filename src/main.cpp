@@ -2,7 +2,6 @@
 
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/config/ConfigManager.hpp>
-#include <hyprland/src/config/values/types/BoolValue.hpp>
 #include <hyprland/src/config/values/types/ColorValue.hpp>
 #include <hyprland/src/config/values/types/FloatValue.hpp>
 #include <hyprland/src/config/values/types/IntValue.hpp>
@@ -107,7 +106,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprwinview:keys_go", "go keys", "return,enter,space,g"));
     addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprwinview:keys_bring", "bring keys", "b,shift+return,shift+space"));
     addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprwinview:keys_close", "close keys", "escape,q"));
-    addConfigValue(makeShared<Config::Values::CBoolValue>("plugin:hyprwinview:show_app_icon", "show app icon overlays", false));
+    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprwinview:show_app_icon", "show app icon overlays", 0));
     addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprwinview:app_icon_size", "app icon size", 48));
     addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprwinview:app_icon_position", "app icon position", "bottom right"));
     addConfigValue(makeShared<Config::Values::CFloatValue>("plugin:hyprwinview:app_icon_anchor_x", "app icon normalized x anchor override", -1.0F));
