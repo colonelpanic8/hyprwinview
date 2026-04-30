@@ -9,7 +9,6 @@
 #include <hyprland/src/debug/log/Logger.hpp>
 #include <hyprland/src/desktop/state/FocusState.hpp>
 #include <hyprland/src/event/EventBus.hpp>
-#include <hyprland/src/helpers/time/Time.hpp>
 #include <hyprland/src/render/OpenGL.hpp>
 #include <hyprland/src/render/Renderer.hpp>
 
@@ -32,51 +31,6 @@ APICALL EXPORT std::string PLUGIN_API_VERSION() {
 
 static void failNotif(const std::string& reason) {
     HyprlandAPI::addNotification(PHANDLE, "[hyprwinview] Failure in initialization: " + reason, CHyprColor{1.0, 0.2, 0.2, 1.0}, 5000);
-}
-
-static CFunctionHook* g_pRenderWorkspaceHook = nullptr;
-typedef void (*origRenderWorkspace)(void*, PHLMONITOR, PHLWORKSPACE, const Time::steady_tp&, const CBox&);
-
-static bool g_renderingWinviewInternals = false;
-static bool g_renderWorkspaceHooked     = false;
-
-struct SWinviewInternalRenderGuard {
-    SWinviewInternalRenderGuard() {
-        g_renderingWinviewInternals = true;
-    }
-
-    ~SWinviewInternalRenderGuard() {
-        g_renderingWinviewInternals = false;
-    }
-};
-
-static void hkRenderWorkspace(void* thisptr, PHLMONITOR pMonitor, PHLWORKSPACE pWorkspace, const Time::steady_tp& now, const CBox& geometry) {
-    if (!g_pWindowOverview || g_renderingWinviewInternals || !pMonitor || g_pWindowOverview->pMonitor != pMonitor) {
-        ((origRenderWorkspace)g_pRenderWorkspaceHook->m_original)(thisptr, pMonitor, pWorkspace, now, geometry);
-        return;
-    }
-
-    g_pWindowOverview->render();
-}
-
-static bool hookRenderWorkspace() {
-    auto FNS = HyprlandAPI::findFunctionsByName(PHANDLE, "renderWorkspace");
-    if (FNS.empty()) {
-        Log::logger->log(Log::ERR, "[hyprwinview] no functions found for hook renderWorkspace");
-        return false;
-    }
-
-    g_pRenderWorkspaceHook = HyprlandAPI::createFunctionHook(PHANDLE, FNS[0].address, (void*)hkRenderWorkspace);
-    if (!g_pRenderWorkspaceHook || !g_pRenderWorkspaceHook->hook()) {
-        Log::logger->log(Log::ERR, "[hyprwinview] failed to hook renderWorkspace; another plugin may already hook it");
-        if (g_pRenderWorkspaceHook) {
-            HyprlandAPI::removeFunctionHook(PHANDLE, g_pRenderWorkspaceHook);
-            g_pRenderWorkspaceHook = nullptr;
-        }
-        return false;
-    }
-
-    return true;
 }
 
 static bool addConfigValue(SP<Config::Values::IValue> value) {
@@ -216,7 +170,6 @@ static SDispatchResult onWinviewDispatcher(std::string arg) {
     if (!MONITOR)
         return {.success = false, .error = "no focused monitor"};
 
-    const SWinviewInternalRenderGuard GUARD;
     g_pWindowOverview = std::make_unique<CWindowOverview>(MONITOR, ARGS->options);
     return {};
 }
@@ -379,13 +332,8 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     addConfigValue(makeShared<Config::Values::CFloatValue>("plugin:hyprwinview:animation_workspace_zoom_stage_ratio", "overview workspace_zoom first-stage fraction", 0.45F));
     addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprwinview:animation_workspace_zoom_gap", "overview workspace_zoom panel gap", 18));
 
-    g_renderWorkspaceHooked = hookRenderWorkspace();
-    if (!g_renderWorkspaceHooked)
-        HyprlandAPI::addNotification(PHANDLE, "[hyprwinview] renderWorkspace hook unavailable; falling back to late overlay rendering",
-                                      CHyprColor{1.0, 0.75, 0.2, 1.0}, 5000);
-
     static auto renderStage = Event::bus()->m_events.render.stage.listen([](eRenderStage stage) {
-        if (g_renderWorkspaceHooked || stage != RENDER_LAST_MOMENT || !g_pWindowOverview)
+        if (stage != RENDER_LAST_MOMENT || !g_pWindowOverview)
             return;
 
         const auto MONITOR = g_pHyprRenderer->m_renderData.pMonitor.lock();
@@ -406,9 +354,4 @@ APICALL EXPORT void PLUGIN_EXIT() {
     g_pWindowOverview.reset();
     clearAppIconCache();
     g_pHyprRenderer->m_renderPass.removeAllOfType("CWinviewPassElement");
-    if (g_pRenderWorkspaceHook) {
-        HyprlandAPI::removeFunctionHook(PHANDLE, g_pRenderWorkspaceHook);
-        g_pRenderWorkspaceHook = nullptr;
-    }
-    g_renderWorkspaceHooked = false;
 }
