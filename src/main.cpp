@@ -108,6 +108,9 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprwinview:keys_close", "close keys", "escape,q"));
     addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprwinview:show_app_icon", "show app icon overlays", 0));
     addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprwinview:app_icon_size", "app icon size", 48));
+    addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprwinview:app_icon_theme", "app icon theme override", ""));
+    addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprwinview:app_icon_theme_source", "app icon theme source", "auto"));
+    addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprwinview:app_icon_overrides", "app icon app_id=icon overrides", ""));
     addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprwinview:app_icon_position", "app icon position", "bottom right"));
     addConfigValue(makeShared<Config::Values::CFloatValue>("plugin:hyprwinview:app_icon_anchor_x", "app icon normalized x anchor override", -1.0F));
     addConfigValue(makeShared<Config::Values::CFloatValue>("plugin:hyprwinview:app_icon_anchor_y", "app icon normalized y anchor override", -1.0F));

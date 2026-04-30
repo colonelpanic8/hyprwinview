@@ -67,6 +67,9 @@ hl.config({
             keys_close = "escape,q",
             show_app_icon = 1,
             app_icon_size = 48,
+            app_icon_theme = "",
+            app_icon_theme_source = "auto",
+            app_icon_overrides = "",
             app_icon_position = "bottom right",
             app_icon_anchor_x = -1.0,
             app_icon_anchor_y = -1.0,
@@ -93,6 +96,14 @@ including combinations like `top left` or `bottom right`; single edges like
 on an axis (`0.0` is left/top, `0.5` is center, `1.0` is right/bottom). Margins
 are logical pixels plus optional relative tile fractions; offsets are final
 logical-pixel nudges.
+
+App icons are resolved through freedesktop icon themes before falling back to a
+plain filesystem search. `app_icon_theme_source` accepts `auto`, `gtk`, `qt`,
+`none`, or `legacy`; `auto` reads GTK settings and Qt/KDE settings, preferring
+Qt first on KDE/LXQt sessions. Set `app_icon_theme` to force a specific icon
+theme name, for example `Papirus-Dark`. Set `app_icon_overrides` to a
+comma-separated list of `app_id=icon` pairs, where `icon` can be a themed icon
+name or an absolute path.
 
 On Hyprland 0.54 and older hyprlang configs, the same options live under
 `plugin { hyprwinview { ... } }`.
