@@ -4,12 +4,15 @@
 #include <cctype>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <exception>
 #include <optional>
 #include <sstream>
 #include <string>
+#include <unordered_map>
 #include <utility>
 
+#include <cairo/cairo.h>
 #define private   public
 #define protected public
 #include <hyprland/src/Compositor.hpp>
@@ -116,6 +119,11 @@ static const CConfigValue<Config::STRING>& PKEYSCLOSE() {
     return VALUE;
 }
 
+static const CConfigValue<Config::STRING>& PKEYSFILTERTOGGLE() {
+    static const CConfigValue<Config::STRING> VALUE("plugin:hyprwinview:keys_filter_toggle");
+    return VALUE;
+}
+
 static const CConfigValue<Config::INTEGER>& PSHOWAPPICON() {
     static const CConfigValue<Config::INTEGER> VALUE("plugin:hyprwinview:show_app_icon");
     return VALUE;
@@ -182,6 +190,42 @@ static const CConfigValue<Config::INTEGER>& PAPPICONBACKPLATEPADDING() {
     return VALUE;
 }
 
+static const CConfigValue<Config::INTEGER>& PSHOWWINDOWTEXT() {
+    static const CConfigValue<Config::INTEGER> VALUE("plugin:hyprwinview:show_window_text");
+    return VALUE;
+}
+
+static const CConfigValue<Config::STRING>& PWINDOWTEXTFONT() {
+    static const CConfigValue<Config::STRING> VALUE("plugin:hyprwinview:window_text_font");
+    return VALUE;
+}
+
+static const CConfigValue<Config::INTEGER>& PWINDOWTEXTSIZE() {
+    static const CConfigValue<Config::INTEGER> VALUE("plugin:hyprwinview:window_text_size");
+    return VALUE;
+}
+
+static const CConfigValue<Config::INTEGER>& PWINDOWTEXTCOLOR() {
+    static const CConfigValue<Config::INTEGER> VALUE("plugin:hyprwinview:window_text_color");
+    return VALUE;
+}
+
+static const CConfigValue<Config::INTEGER>& PWINDOWTEXTBACKPLATE() {
+    static const CConfigValue<Config::INTEGER> VALUE(
+        "plugin:hyprwinview:window_text_backplate_col");
+    return VALUE;
+}
+
+static const CConfigValue<Config::INTEGER>& PWINDOWTEXTPADDING() {
+    static const CConfigValue<Config::INTEGER> VALUE("plugin:hyprwinview:window_text_padding");
+    return VALUE;
+}
+
+static const CConfigValue<Config::INTEGER>& PFILTERANIMATIONMS() {
+    static const CConfigValue<Config::INTEGER> VALUE("plugin:hyprwinview:filter_animation_ms");
+    return VALUE;
+}
+
 static const CConfigValue<Config::STRING>& PANIMATION() {
     static const CConfigValue<Config::STRING> VALUE("plugin:hyprwinview:animation");
     return VALUE;
@@ -229,7 +273,7 @@ static const CConfigValue<Config::INTEGER>& PANIMATIONWORKSPACEZOOMGAP() {
     return VALUE;
 }
 
-enum class EOverviewAnimation {
+enum class EOverviewAnimation : uint8_t {
     NONE,
     FADE,
     FADE_SCALE,
@@ -256,6 +300,7 @@ SWinviewKeyConfig                       defaultWinviewKeyConfig() {
                               .bring        = {"b", "shift+return", "shift+space"},
                               .bringReplace = {"shift+b"},
                               .close        = {"escape", "q"},
+                              .filterToggle = {"/"},
     };
 }
 
@@ -304,6 +349,12 @@ static std::string normalizeKeyName(std::string key) {
         return "up";
     if (key == "arrowdown")
         return "down";
+    if (key == "backspace" || key == "bs")
+        return "backspace";
+    if (key == "delete" || key == "del")
+        return "delete";
+    if (key == "slash")
+        return "/";
 
     return key;
 }
@@ -325,6 +376,12 @@ static xkb_keysym_t keysymForName(const std::string& key) {
         return XKB_KEY_space;
     if (NORMALIZED == "escape")
         return XKB_KEY_Escape;
+    if (NORMALIZED == "backspace")
+        return XKB_KEY_BackSpace;
+    if (NORMALIZED == "delete")
+        return XKB_KEY_Delete;
+    if (NORMALIZED == "/")
+        return XKB_KEY_slash;
 
     return xkb_keysym_from_name(NORMALIZED.c_str(), XKB_KEYSYM_CASE_INSENSITIVE);
 }
@@ -385,6 +442,7 @@ static SWinviewKeyConfig keyConfigFromConfigValues() {
         .bring        = keyTokens(configStringOr(PKEYSBRING(), "b,shift+return,shift+space")),
         .bringReplace = keyTokens(configStringOr(PKEYSBRINGREPLACE(), "shift+b")),
         .close        = keyTokens(configStringOr(PKEYSCLOSE(), "escape,q")),
+        .filterToggle = keyTokens(configStringOr(PKEYSFILTERTOGGLE(), "/")),
     };
 }
 
@@ -395,6 +453,74 @@ static SWinviewKeyConfig activeKeyConfig() {
 static std::string lower(std::string value) {
     std::ranges::transform(value, value.begin(), [](unsigned char c) { return std::tolower(c); });
     return value;
+}
+
+static std::vector<std::string> queryTokens(const std::string& query) {
+    std::vector<std::string> result;
+    std::stringstream        stream(lower(query));
+    std::string              token;
+
+    while (stream >> token)
+        result.push_back(token);
+
+    return result;
+}
+
+static std::string windowTitle(const PHLWINDOW& window) {
+    if (!window)
+        return "";
+
+    if (!window->m_title.empty())
+        return window->m_title;
+
+    return window->m_initialTitle;
+}
+
+static std::string windowClass(const PHLWINDOW& window) {
+    if (!window)
+        return "";
+
+    if (!window->m_class.empty())
+        return window->m_class;
+
+    return window->m_initialClass;
+}
+
+static std::string searchableWindowText(const PHLWINDOW& window) {
+    if (!window)
+        return "";
+
+    return lower(windowTitle(window) + " " + windowClass(window) + " " + window->m_initialTitle +
+                 " " + window->m_initialClass);
+}
+
+static bool windowMatchesQuery(const PHLWINDOW& window, const std::string& query) {
+    const auto TOKENS = queryTokens(query);
+    if (TOKENS.empty())
+        return true;
+
+    const auto SEARCHABLE = searchableWindowText(window);
+    return std::ranges::all_of(TOKENS, [&SEARCHABLE](const std::string& token) {
+        return SEARCHABLE.find(token) != std::string::npos;
+    });
+}
+
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
+static std::string printableTextForKeysym(xkb_keysym_t keysym, uint32_t mods) {
+    constexpr uint32_t TEXT_BLOCKING_MODS = HL_MODIFIER_CTRL | HL_MODIFIER_ALT | HL_MODIFIER_META;
+    if ((mods & TEXT_BLOCKING_MODS) != 0)
+        return "";
+
+    char      buffer[64] = {};
+    const int len        = xkb_keysym_to_utf8(keysym, buffer, sizeof(buffer));
+    if (len <= 0)
+        return "";
+
+    std::string result(buffer, std::min<int>(len, sizeof(buffer) - 1));
+    if (std::ranges::any_of(result, [](unsigned char c) { return std::iscntrl(c); }))
+        return "";
+
+    return result;
 }
 
 static std::string uniqueWindowGroupKey(const PHLWINDOW&, size_t originalIndex) {
@@ -485,7 +611,9 @@ static int workspaceGridRowsForCount(int count, int cols) {
 
 static double animationDurationMs(bool closing) {
     const double SPEED = std::clamp<double>(*PANIMATIONSPEED(), 0.1, 10.0);
-    return std::max<Config::INTEGER>(0, closing ? *PANIMATIONOUTMS() : *PANIMATIONINMS()) / SPEED;
+    return static_cast<double>(
+               std::max<Config::INTEGER>(0, closing ? *PANIMATIONOUTMS() : *PANIMATIONINMS())) /
+        SPEED;
 }
 
 static double easeOutCubic(double t) {
@@ -524,7 +652,7 @@ static CBox scaleBoxFromCenter(const CBox& box, double scale) {
 }
 
 static CHyprColor multiplyAlpha(const CHyprColor& color, double alpha) {
-    return color.modifyA(color.a * std::clamp(alpha, 0.0, 1.0));
+    return color.modifyA(static_cast<float>(color.a * std::clamp(alpha, 0.0, 1.0)));
 }
 
 static double lerpDouble(double from, double to, double progress) {
@@ -548,6 +676,108 @@ static CHyprColor activeBackgroundColor() {
         return CHyprColor(BG_COL);
 
     return CHyprColor(BACKGROUND);
+}
+
+struct STextTexture {
+    SP<Render::ITexture> texture;
+    Vector2D             size;
+};
+
+struct STextTextureCacheEntry {
+    SP<Render::ITexture> texture;
+    Vector2D             size;
+};
+
+static std::unordered_map<std::string, STextTextureCacheEntry> g_textTextureCache;
+
+static double cairoTextWidth(cairo_t* cr, const std::string& text) {
+    cairo_text_extents_t extents;
+    cairo_text_extents(cr, text.c_str(), &extents);
+    return extents.x_advance;
+}
+
+static std::string elideTextToWidth(cairo_t* cr, const std::string& text, double maxWidth) {
+    if (text.empty() || cairoTextWidth(cr, text) <= maxWidth)
+        return text;
+
+    static constexpr const char* ELLIPSIS = "...";
+    if (cairoTextWidth(cr, ELLIPSIS) > maxWidth)
+        return "";
+
+    std::string result = text;
+    while (!result.empty() && cairoTextWidth(cr, result + ELLIPSIS) > maxWidth)
+        result.pop_back();
+
+    return result + ELLIPSIS;
+}
+
+static STextTexture textTextureForLines(const std::vector<std::string>& lines, int fontSizePx,
+                                        int maxWidthPx, const CHyprColor& color,
+                                        const std::string& font) {
+    if (lines.empty() || fontSizePx <= 0 || maxWidthPx <= 0)
+        return {};
+
+    std::string key = font + "|" + std::to_string(fontSizePx) + "|" + std::to_string(maxWidthPx) +
+        "|" + std::to_string((uint64_t)(color.r * 255.0)) + "," +
+        std::to_string((uint64_t)(color.g * 255.0)) + "," +
+        std::to_string((uint64_t)(color.b * 255.0)) + "," +
+        std::to_string((uint64_t)(color.a * 255.0));
+    for (const auto& line : lines)
+        key += "|" + line;
+
+    if (const auto IT = g_textTextureCache.find(key); IT != g_textTextureCache.end())
+        return {.texture = IT->second.texture, .size = IT->second.size};
+
+    cairo_surface_t* measureSurface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 1, 1);
+    cairo_t*         measure        = cairo_create(measureSurface);
+    cairo_select_font_face(measure, font.c_str(), CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
+    cairo_set_font_size(measure, fontSizePx);
+
+    cairo_font_extents_t fontExtents;
+    cairo_font_extents(measure, &fontExtents);
+
+    std::vector<std::string> renderedLines;
+    renderedLines.reserve(lines.size());
+    double width = 1.0;
+    for (const auto& line : lines) {
+        auto renderedLine = elideTextToWidth(measure, line, maxWidthPx);
+        width             = std::max(width, cairoTextWidth(measure, renderedLine));
+        renderedLines.push_back(std::move(renderedLine));
+    }
+
+    const int textureWidth  = std::max(1, (int)std::ceil(std::min<double>(width, maxWidthPx)));
+    const int lineHeight    = std::max(1, (int)std::ceil(fontExtents.height));
+    const int textureHeight = std::max(1, lineHeight * (int)renderedLines.size());
+
+    cairo_destroy(measure);
+    cairo_surface_destroy(measureSurface);
+
+    cairo_surface_t* surface =
+        cairo_image_surface_create(CAIRO_FORMAT_ARGB32, textureWidth, textureHeight);
+    cairo_t* cr = cairo_create(surface);
+    cairo_set_operator(cr, CAIRO_OPERATOR_CLEAR);
+    cairo_paint(cr);
+    cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
+    cairo_select_font_face(cr, font.c_str(), CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
+    cairo_set_font_size(cr, fontSizePx);
+    cairo_set_source_rgba(cr, color.r, color.g, color.b, color.a);
+
+    for (size_t i = 0; i < renderedLines.size(); ++i) {
+        cairo_move_to(cr, 0.0, fontExtents.ascent + static_cast<double>(i) * lineHeight);
+        cairo_show_text(cr, renderedLines[i].c_str());
+    }
+
+    cairo_destroy(cr);
+
+    auto texture = g_pHyprRenderer->createTexture(surface);
+    cairo_surface_destroy(surface);
+
+    if (!texture)
+        return {};
+
+    const Vector2D size{(double)textureWidth, (double)textureHeight};
+    g_textTextureCache.emplace(key, STextTextureCacheEntry{.texture = texture, .size = size});
+    return {.texture = texture, .size = size};
 }
 
 static Vector2D iconAnchorFromPosition(const std::string& position) {
@@ -599,6 +829,7 @@ static double anchorOverride(double configured, double fallback) {
     return configured >= 0.0 ? std::clamp(configured, 0.0, 1.0) : fallback;
 }
 
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
 static double edgeSignedMargin(double anchor, double absolute, double relative, double extent) {
     if (anchor < 0.5)
         return absolute + relative * extent;
@@ -608,19 +839,19 @@ static double edgeSignedMargin(double anchor, double absolute, double relative, 
 }
 
 static CBox appIconBoxForTile(const CBox& tileLogical, double scale) {
-    const int SIZE   = std::max<Config::INTEGER>(1, *PAPPICONSIZE());
+    const int SIZE   = static_cast<int>(std::max<Config::INTEGER>(1, *PAPPICONSIZE()));
     Vector2D  anchor = iconAnchorFromPosition(configStringOr(PAPPICONPOSITION(), "bottom right"));
     anchor.x         = anchorOverride(*PAPPICONANCHORX(), anchor.x);
     anchor.y         = anchorOverride(*PAPPICONANCHORY(), anchor.y);
 
-    const double xMargin =
-        edgeSignedMargin(anchor.x, *PAPPICONMARGINX(), *PAPPICONMARGINRELX(), tileLogical.w);
-    const double yMargin =
-        edgeSignedMargin(anchor.y, *PAPPICONMARGINY(), *PAPPICONMARGINRELY(), tileLogical.h);
+    const double xMargin = edgeSignedMargin(anchor.x, static_cast<double>(*PAPPICONMARGINX()),
+                                            *PAPPICONMARGINRELX(), tileLogical.w);
+    const double yMargin = edgeSignedMargin(anchor.y, static_cast<double>(*PAPPICONMARGINY()),
+                                            *PAPPICONMARGINRELY(), tileLogical.h);
     const double x = tileLogical.x + anchor.x * std::max(0.0, tileLogical.w - SIZE) + xMargin +
-        *PAPPICONOFFSETX();
+        static_cast<double>(*PAPPICONOFFSETX());
     const double y = tileLogical.y + anchor.y * std::max(0.0, tileLogical.h - SIZE) + yMargin +
-        *PAPPICONOFFSETY();
+        static_cast<double>(*PAPPICONOFFSETY());
 
     return CBox{x, y, (double)SIZE, (double)SIZE}.scale(scale).round();
 }
@@ -637,17 +868,19 @@ static bool previewableWindow(const PHLWINDOW& window) {
     return true;
 }
 
-CWindowOverview::CWindowOverview(PHLMONITOR monitor, SWindowOverviewOptions options_) :
+CWindowOverview::CWindowOverview(const PHLMONITOR& monitor, SWindowOverviewOptions options_) :
     pMonitor(monitor), options(options_) {
-    animationStartedAt      = Time::steadyNow();
-    initialFocusedWindow    = Desktop::focusState()->window();
-    initialFocusedWorkspace = initialFocusedWindow && initialFocusedWindow->m_workspace ?
-        initialFocusedWindow->m_workspace :
-        (pMonitor ? pMonitor->m_activeWorkspace : nullptr);
+    animationStartedAt       = Time::steadyNow();
+    filterAnimationStartedAt = animationStartedAt;
+    filterMode               = options.startInFilterMode;
+    initialFocusedWindow     = Desktop::focusState()->window();
+    initialFocusedWorkspace  = initialFocusedWindow && initialFocusedWindow->m_workspace ?
+         initialFocusedWindow->m_workspace :
+         (pMonitor ? pMonitor->m_activeWorkspace : nullptr);
 
     collectWindows();
-    updateLayout();
     renderSnapshots();
+    rebuildVisiblePreviews(false);
 
     lastMousePosLocal = g_pInputManager->getMouseCoordsInternal() - pMonitor->m_position;
     selectedIndex     = hoveredIndex();
@@ -692,13 +925,17 @@ CWindowOverview::CWindowOverview(PHLMONITOR monitor, SWindowOverviewOptions opti
     mouseMoveHook = Event::bus()->m_events.input.mouse.move.listen(
         [onCursorMove](Vector2D, Event::SCallbackInfo& info) { onCursorMove(info); });
     touchMoveHook = Event::bus()->m_events.input.touch.motion.listen(
-        [onCursorMove](ITouch::SMotionEvent, Event::SCallbackInfo& info) { onCursorMove(info); });
+        [onCursorMove](const ITouch::SMotionEvent&, Event::SCallbackInfo& info) {
+            onCursorMove(info);
+        });
     mouseButtonHook = Event::bus()->m_events.input.mouse.button.listen(
-        [onCursorSelect](IPointer::SButtonEvent, Event::SCallbackInfo& info) {
+        [onCursorSelect](const IPointer::SButtonEvent&, Event::SCallbackInfo& info) {
             onCursorSelect(info);
         });
     touchDownHook = Event::bus()->m_events.input.touch.down.listen(
-        [onCursorSelect](ITouch::SDownEvent, Event::SCallbackInfo& info) { onCursorSelect(info); });
+        [onCursorSelect](const ITouch::SDownEvent&, Event::SCallbackInfo& info) {
+            onCursorSelect(info);
+        });
     keyboardHook = Event::bus()->m_events.input.keyboard.key.listen(
         [onKeyboardKey](IKeyboard::SKeyEvent event, Event::SCallbackInfo& info) {
             onKeyboardKey(event, info);
@@ -709,13 +946,15 @@ CWindowOverview::CWindowOverview(PHLMONITOR monitor, SWindowOverviewOptions opti
 
 CWindowOverview::~CWindowOverview() {
     Render::GL::g_pHyprOpenGL->makeEGLCurrent();
-    for (auto& preview : previews)
+    for (auto& preview : allPreviews)
         preview.fb.reset();
+    allPreviews.clear();
     previews.clear();
+    exitingPreviews.clear();
 }
 
 void CWindowOverview::collectWindows() {
-    previews.clear();
+    allPreviews.clear();
 
     const auto CURRENT_WORKSPACE = pMonitor ? pMonitor->m_activeWorkspace : nullptr;
 
@@ -728,23 +967,23 @@ void CWindowOverview::collectWindows() {
             window->m_workspace == CURRENT_WORKSPACE)
             continue;
 
-        previews.push_back({.window = window});
+        allPreviews.push_back({.window = window});
     }
 
-    std::ranges::reverse(previews);
-    applyWindowOrdering();
+    std::ranges::reverse(allPreviews);
+    applyWindowOrdering(allPreviews);
     updateWorkspaceGrid();
 }
 
-void CWindowOverview::applyWindowOrdering() {
-    if (previews.empty())
+void CWindowOverview::applyWindowOrdering(std::vector<SWindowPreview>& windowPreviews) {
+    if (windowPreviews.empty())
         return;
 
     const auto&              STRATEGY = activeWindowOrderingStrategy();
     std::vector<std::string> groupOrder;
 
-    for (size_t i = 0; i < previews.size(); ++i) {
-        auto& preview               = previews[i];
+    for (size_t i = 0; i < windowPreviews.size(); ++i) {
+        auto& preview               = windowPreviews[i];
         preview.orderOriginalIndex  = i;
         preview.orderGroupKey       = STRATEGY.groupKeyForWindow(preview.window, i);
         const auto GROUP_ORDER_ITER = std::ranges::find(groupOrder, preview.orderGroupKey);
@@ -757,7 +996,7 @@ void CWindowOverview::applyWindowOrdering() {
         }
     }
 
-    std::ranges::stable_sort(previews, [](const SWindowPreview& a, const SWindowPreview& b) {
+    std::ranges::stable_sort(windowPreviews, [](const SWindowPreview& a, const SWindowPreview& b) {
         if (a.orderGroupIndex != b.orderGroupIndex)
             return a.orderGroupIndex < b.orderGroupIndex;
 
@@ -775,7 +1014,7 @@ void CWindowOverview::updateWorkspaceGrid() {
         workspaceCount = std::max(workspaceCount, (int)workspace->m_id);
     }
 
-    for (const auto& preview : previews) {
+    for (const auto& preview : allPreviews) {
         if (!preview.window || !preview.window->m_workspace ||
             preview.window->m_workspace->m_isSpecialWorkspace ||
             preview.window->m_workspace->m_id <= 0)
@@ -789,11 +1028,78 @@ void CWindowOverview::updateWorkspaceGrid() {
     workspaceGridRows  = workspaceGridRowsForCount(workspaceGridCount, workspaceGridCols);
 }
 
-void CWindowOverview::updateLayout() {
-    if (!pMonitor || previews.empty())
-        return;
+void CWindowOverview::rebuildVisiblePreviews(bool animate) {
+    auto OLD_PREVIEWS = previews;
+    if (filterAnimating) {
+        for (auto& preview : OLD_PREVIEWS)
+            preview.tileLogical = filterTransitionTileLogicalBox(preview);
+    }
 
-    const double count  = previews.size();
+    const auto OLD_SELECTED = selectedIndex >= 0 && selectedIndex < (int)previews.size() ?
+        previews[selectedIndex].window :
+        PHLWINDOW{};
+
+    previews.clear();
+    for (const auto& preview : allPreviews) {
+        if (windowMatchesQuery(preview.window, filterQuery))
+            previews.push_back(preview);
+    }
+
+    updateLayout();
+
+    if (animate) {
+        exitingPreviews.clear();
+
+        for (const auto& oldPreview : OLD_PREVIEWS) {
+            const bool STILL_VISIBLE = std::ranges::any_of(
+                previews, [&oldPreview](const auto& p) { return p.window == oldPreview.window; });
+            if (!STILL_VISIBLE) {
+                auto exiting               = oldPreview;
+                exiting.filterStartLogical = oldPreview.tileLogical;
+                exitingPreviews.push_back(std::move(exiting));
+            }
+        }
+
+        for (auto& preview : previews) {
+            const auto OLD = std::ranges::find_if(
+                OLD_PREVIEWS, [&preview](const auto& old) { return old.window == preview.window; });
+            preview.filterStartLogical =
+                OLD != OLD_PREVIEWS.end() ? OLD->tileLogical : preview.tileLogical;
+        }
+
+        filterAnimating          = true;
+        filterAnimationStartedAt = Time::steadyNow();
+    } else {
+        exitingPreviews.clear();
+        filterAnimating = false;
+        for (auto& preview : previews)
+            preview.filterStartLogical = preview.tileLogical;
+    }
+
+    selectedIndex = -1;
+    if (OLD_SELECTED) {
+        for (size_t i = 0; i < previews.size(); ++i) {
+            if (previews[i].window == OLD_SELECTED) {
+                selectedIndex = static_cast<int>(i);
+                break;
+            }
+        }
+    }
+
+    if (selectedIndex < 0 && !previews.empty())
+        selectedIndex = 0;
+
+    if (selectedIndex >= 0)
+        lastMousePosLocal = previews[selectedIndex].tileLogical.middle();
+}
+
+void CWindowOverview::updateLayout() {
+    if (!pMonitor || previews.empty()) {
+        gridCols = 1;
+        return;
+    }
+
+    const double count  = static_cast<double>(previews.size());
     const double aspect = std::max(0.1, pMonitor->m_size.x / std::max(1.0, pMonitor->m_size.y));
     int          cols   = std::max(1, (int)std::ceil(std::sqrt(count * aspect)));
     int          rows   = std::max(1, (int)std::ceil(count / cols));
@@ -804,8 +1110,8 @@ void CWindowOverview::updateLayout() {
     rows     = std::max(1, (int)std::ceil(count / cols));
     gridCols = cols;
 
-    const double margin = std::max<Config::INTEGER>(0, *PMARGIN());
-    const double gap    = std::max<Config::INTEGER>(0, *PGAP());
+    const double margin = static_cast<double>(std::max<Config::INTEGER>(0, *PMARGIN()));
+    const double gap    = static_cast<double>(std::max<Config::INTEGER>(0, *PGAP()));
     const double areaW  = std::max(1.0, pMonitor->m_size.x - margin * 2.0);
     const double areaH  = std::max(1.0, pMonitor->m_size.y - margin * 2.0);
     const double cellW  = (areaW - gap * (cols - 1)) / cols;
@@ -836,13 +1142,14 @@ void CWindowOverview::renderSnapshots() {
 
     const auto FORMAT = framebufferFormatWithAlpha(pMonitor->m_output->state->state().drmFormat);
 
-    for (auto& preview : previews) {
+    for (auto& preview : allPreviews) {
         if (!preview.fb)
             preview.fb = g_pHyprRenderer->createFB("hyprwinview");
 
         if (preview.fb->m_size != pMonitor->m_pixelSize) {
             preview.fb->release();
-            preview.fb->alloc(pMonitor->m_pixelSize.x, pMonitor->m_pixelSize.y, FORMAT);
+            preview.fb->alloc(static_cast<int>(pMonitor->m_pixelSize.x),
+                              static_cast<int>(pMonitor->m_pixelSize.y), FORMAT);
         }
 
         CRegion fakeDamage{0, 0,
@@ -865,7 +1172,7 @@ void CWindowOverview::renderSnapshots() {
 int CWindowOverview::hoveredIndex() const {
     for (size_t i = 0; i < previews.size(); ++i) {
         if (previews[i].tileLogical.containsPoint(lastMousePosLocal))
-            return i;
+            return static_cast<int>(i);
     }
 
     return -1;
@@ -884,17 +1191,121 @@ void CWindowOverview::draw() {
     if (!pMonitor)
         return;
 
-    const auto SCALE      = pMonitor->m_scale;
-    const auto HOVERED    = selectedIndex;
-    const int  BORDER     = std::max<Config::INTEGER>(0, *PBORDERSIZE());
-    const auto ANIMATION  = overviewAnimation();
-    const auto VISIBLE    = animationVisibleAmount();
-    const auto BASE_SCALE = std::clamp<double>(*PANIMATIONSCALE(), 0.01, 1.0);
-    CRegion    fullDamage = {0, 0, INT16_MAX, INT16_MAX};
+    const double SCALE      = pMonitor->m_scale;
+    const auto   HOVERED    = selectedIndex;
+    const int    BORDER     = static_cast<int>(std::max<Config::INTEGER>(0, *PBORDERSIZE()));
+    const auto   ANIMATION  = overviewAnimation();
+    const auto   VISIBLE    = animationVisibleAmount();
+    const auto   BASE_SCALE = std::clamp<double>(*PANIMATIONSCALE(), 0.01, 1.0);
+    CRegion      fullDamage = {0, 0, INT16_MAX, INT16_MAX};
 
     Render::GL::g_pHyprOpenGL->renderRect(
         CBox{{0, 0}, pMonitor->m_pixelSize}, multiplyAlpha(activeBackgroundColor(), VISIBLE),
         {.damage = &fullDamage, .blur = backgroundBlurEnabled(), .blurA = (float)VISIBLE});
+
+    // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
+    auto drawPreview = [&](SWindowPreview& preview, CBox tilePx, double tileVisible,
+                           double textureAlpha, bool selected) {
+        if (!preview.fb || !preview.fb->getTexture())
+            return;
+
+        CBox texBox = {
+            tilePx.x,
+            tilePx.y,
+            pMonitor->m_pixelSize.x *
+                (tilePx.w / std::max(1.0, preview.window->m_realSize->value().x * SCALE)),
+            pMonitor->m_pixelSize.y *
+                (tilePx.h / std::max(1.0, preview.window->m_realSize->value().y * SCALE)),
+        };
+
+        if (BORDER > 0) {
+            const auto COLOR = selected ? CHyprColor(*PHOVERBORDER()) : CHyprColor(*PBORDER());
+            Render::GL::g_pHyprOpenGL->renderRect(tilePx.copy().expand(BORDER),
+                                                  multiplyAlpha(COLOR, tileVisible),
+                                                  {.damage = &fullDamage, .round = BORDER * 2});
+        }
+
+        g_pHyprRenderer->m_renderData.clipBox = tilePx;
+        Render::GL::g_pHyprOpenGL->renderTexture(
+            preview.fb->getTexture(), texBox,
+            {.damage = &fullDamage, .a = (float)textureAlpha, .round = BORDER * 2});
+        g_pHyprRenderer->m_renderData.clipBox = {};
+
+        if (*PSHOWAPPICON() != 0) {
+            const int ICON_SIZE_PX = std::max(
+                1,
+                (int)std::round(static_cast<double>(std::max<Config::INTEGER>(1, *PAPPICONSIZE())) *
+                                SCALE));
+            if (const auto ICON = appIconTextureForWindow(preview.window, ICON_SIZE_PX)) {
+                CBox      currentLogicalTile{tilePx.x / SCALE, tilePx.y / SCALE, tilePx.w / SCALE,
+                                        tilePx.h / SCALE};
+                CBox      iconBox = appIconBoxForTile(currentLogicalTile, SCALE);
+                const int PADDING =
+                    std::max(0,
+                             (int)std::round(static_cast<double>(std::max<Config::INTEGER>(
+                                                 0, *PAPPICONBACKPLATEPADDING())) *
+                                             SCALE));
+                if (PADDING > 0)
+                    Render::GL::g_pHyprOpenGL->renderRect(
+                        iconBox.copy().expand(PADDING).round(),
+                        multiplyAlpha(CHyprColor(*PAPPICONBACKPLATE()), tileVisible),
+                        {.damage = &fullDamage, .round = std::max(1, PADDING)});
+
+                Render::GL::g_pHyprOpenGL->renderTexture(
+                    ICON, iconBox, {.damage = &fullDamage, .a = (float)tileVisible});
+            }
+        }
+
+        if (*PSHOWWINDOWTEXT() != 0) {
+            const int PADDING =
+                std::max(0, (int)std::round(static_cast<double>(*PWINDOWTEXTPADDING()) * SCALE));
+            const int FONT_SIZE =
+                std::max(1, (int)std::round(static_cast<double>(*PWINDOWTEXTSIZE()) * SCALE));
+            const int  MAX_WIDTH = std::max(1, (int)std::round(tilePx.w - PADDING * 2));
+            const auto TITLE     = windowTitle(preview.window);
+            const auto CLASS     = windowClass(preview.window);
+            std::vector<std::string> lines;
+            if (!TITLE.empty())
+                lines.push_back(TITLE);
+            if (!CLASS.empty() && CLASS != TITLE)
+                lines.push_back(CLASS);
+
+            if (!lines.empty()) {
+                const auto TEXT = textTextureForLines(lines, FONT_SIZE, MAX_WIDTH,
+                                                      CHyprColor(*PWINDOWTEXTCOLOR()),
+                                                      configStringOr(PWINDOWTEXTFONT(), "Sans"));
+                if (TEXT.texture) {
+                    const auto WIDTH  = std::min<double>(TEXT.size.x, MAX_WIDTH);
+                    const auto HEIGHT = TEXT.size.y;
+                    CBox       labelBox{
+                        tilePx.x + PADDING,
+                        std::max(tilePx.y + PADDING, tilePx.y + tilePx.h - HEIGHT - PADDING),
+                        WIDTH,
+                        HEIGHT,
+                    };
+
+                    Render::GL::g_pHyprOpenGL->renderRect(
+                        labelBox.copy().expand(PADDING).round(),
+                        multiplyAlpha(CHyprColor(*PWINDOWTEXTBACKPLATE()), tileVisible),
+                        {.damage = &fullDamage, .round = std::max(1, PADDING)});
+                    Render::GL::g_pHyprOpenGL->renderTexture(
+                        TEXT.texture, labelBox, {.damage = &fullDamage, .a = (float)tileVisible});
+                }
+            }
+        }
+    };
+
+    const auto FILTER_PROGRESS = filterTransitionVisibleAmount();
+    for (auto& preview : exitingPreviews) {
+        const auto EXIT_VISIBLE = VISIBLE * (1.0 - FILTER_PROGRESS);
+        if (EXIT_VISIBLE <= 0.0)
+            continue;
+
+        CBox tilePx = scaleBoxFromCenter(preview.tileLogical, 0.96 + 0.04 * EXIT_VISIBLE)
+                          .scale(SCALE)
+                          .round();
+        drawPreview(preview, tilePx, EXIT_VISIBLE, EXIT_VISIBLE, false);
+    }
 
     for (size_t i = 0; i < previews.size(); ++i) {
         auto& preview = previews[i];
@@ -908,49 +1319,44 @@ void CWindowOverview::draw() {
         CBox tilePx = scaleBoxFromCenter(animatedTileLogicalBox(i, TILE_VISIBLE), TILE_SCALE)
                           .scale(SCALE)
                           .round();
-        CBox texBox = {
-            tilePx.x,
-            tilePx.y,
-            pMonitor->m_pixelSize.x *
-                (tilePx.w / std::max(1.0, preview.window->m_realSize->value().x * SCALE)),
-            pMonitor->m_pixelSize.y *
-                (tilePx.h / std::max(1.0, preview.window->m_realSize->value().y * SCALE)),
+
+        drawPreview(preview, tilePx, TILE_VISIBLE, TEXTURE_ALPHA, (int)i == HOVERED);
+    }
+
+    if (filterMode || !filterQuery.empty()) {
+        const int PADDING = std::max(4, (int)std::round(8.0 * SCALE));
+        const int FONT_SIZE =
+            std::max(1, (int)std::round(static_cast<double>(*PWINDOWTEXTSIZE() + 2) * SCALE));
+        const int MAX_WIDTH = std::max(1, (int)std::round(pMonitor->m_pixelSize.x * 0.72));
+        std::vector<std::string> lines = {
+            "Filter: " + filterQuery + (filterMode ? "_" : ""),
         };
+        if (previews.empty() && !filterQuery.empty())
+            lines.push_back("No matches");
 
-        if (BORDER > 0) {
-            const auto COLOR =
-                (int)i == HOVERED ? CHyprColor(*PHOVERBORDER()) : CHyprColor(*PBORDER());
-            Render::GL::g_pHyprOpenGL->renderRect(tilePx.copy().expand(BORDER),
-                                                  multiplyAlpha(COLOR, TILE_VISIBLE),
-                                                  {.damage = &fullDamage, .round = BORDER * 2});
+        const auto TEXT =
+            textTextureForLines(lines, FONT_SIZE, MAX_WIDTH, CHyprColor(*PWINDOWTEXTCOLOR()),
+                                configStringOr(PWINDOWTEXTFONT(), "Sans"));
+        if (TEXT.texture) {
+            CBox promptBox{
+                std::round((pMonitor->m_pixelSize.x - TEXT.size.x) / 2.0),
+                std::round(static_cast<double>(std::max<Config::INTEGER>(0, *PMARGIN())) * SCALE /
+                           2.0),
+                TEXT.size.x,
+                TEXT.size.y,
+            };
+            Render::GL::g_pHyprOpenGL->renderRect(
+                promptBox.copy().expand(PADDING).round(),
+                multiplyAlpha(CHyprColor(*PWINDOWTEXTBACKPLATE()), VISIBLE),
+                {.damage = &fullDamage, .round = std::max(1, PADDING)});
+            Render::GL::g_pHyprOpenGL->renderTexture(TEXT.texture, promptBox,
+                                                     {.damage = &fullDamage, .a = (float)VISIBLE});
         }
+    }
 
-        g_pHyprRenderer->m_renderData.clipBox = tilePx;
-        Render::GL::g_pHyprOpenGL->renderTexture(
-            preview.fb->getTexture(), texBox,
-            {.damage = &fullDamage, .a = (float)TEXTURE_ALPHA, .round = BORDER * 2});
-        g_pHyprRenderer->m_renderData.clipBox = {};
-
-        if (*PSHOWAPPICON() != 0) {
-            const int ICON_SIZE_PX =
-                std::max(1, (int)std::round(std::max<Config::INTEGER>(1, *PAPPICONSIZE()) * SCALE));
-            if (const auto ICON = appIconTextureForWindow(preview.window, ICON_SIZE_PX)) {
-                CBox iconBox =
-                    scaleBoxFromCenter(appIconBoxForTile(preview.tileLogical, SCALE), TILE_SCALE);
-                const int PADDING = std::max(
-                    0,
-                    (int)std::round(std::max<Config::INTEGER>(0, *PAPPICONBACKPLATEPADDING()) *
-                                    SCALE));
-                if (PADDING > 0)
-                    Render::GL::g_pHyprOpenGL->renderRect(
-                        iconBox.copy().expand(PADDING).round(),
-                        multiplyAlpha(CHyprColor(*PAPPICONBACKPLATE()), TILE_VISIBLE),
-                        {.damage = &fullDamage, .round = std::max(1, PADDING)});
-
-                Render::GL::g_pHyprOpenGL->renderTexture(
-                    ICON, iconBox, {.damage = &fullDamage, .a = (float)TILE_VISIBLE});
-            }
-        }
+    if (filterAnimating && FILTER_PROGRESS >= 1.0) {
+        filterAnimating = false;
+        exitingPreviews.clear();
     }
 
     if (isAnimating())
@@ -1007,7 +1413,7 @@ void CWindowOverview::moveSelection(int dx, int dy) {
     int        next   = previewIndexForVisualCell(newRow, newCol);
 
     if (next < 0)
-        next = previews.size() - 1;
+        next = static_cast<int>(previews.size()) - 1;
 
     if (next != selectedIndex) {
         selectedIndex     = next;
@@ -1058,7 +1464,8 @@ double CWindowOverview::tileAnimationDelayMs(size_t index) const {
 
     const size_t ORDER_INDEX =
         closing ? previews.size() - 1 - std::min(index, previews.size() - 1) : index;
-    return std::min<double>(ORDER_INDEX * STAGGER_MS, MAX_STAGGER_MS);
+    return std::min<double>(static_cast<double>(ORDER_INDEX) * static_cast<double>(STAGGER_MS),
+                            static_cast<double>(MAX_STAGGER_MS));
 }
 
 double CWindowOverview::maxTileAnimationDelayMs() const {
@@ -1071,10 +1478,12 @@ double CWindowOverview::maxTileAnimationDelayMs() const {
     if (STAGGER_MS <= 0 || MAX_STAGGER_MS <= 0)
         return 0.0;
 
-    return std::min<double>((previews.size() - 1) * STAGGER_MS, MAX_STAGGER_MS);
+    return std::min<double>(static_cast<double>(previews.size() - 1) *
+                                static_cast<double>(STAGGER_MS),
+                            static_cast<double>(MAX_STAGGER_MS));
 }
 
-int CWindowOverview::workspacePanelIndexForWorkspace(PHLWORKSPACE workspace) const {
+int CWindowOverview::workspacePanelIndexForWorkspace(const PHLWORKSPACE& workspace) const {
     if (workspace && !workspace->m_isSpecialWorkspace && workspace->m_id > 0)
         return std::clamp((int)workspace->m_id - 1, 0, std::max(0, workspaceGridCount - 1));
 
@@ -1091,14 +1500,15 @@ CBox CWindowOverview::workspacePanelCellLogical(int index) const {
 
     index = std::clamp(index, 0, count - 1);
 
-    const double margin = std::max<Config::INTEGER>(0, *PMARGIN());
-    const double gap    = std::max<Config::INTEGER>(0, *PANIMATIONWORKSPACEZOOMGAP());
-    const double areaW  = std::max(1.0, pMonitor->m_size.x - margin * 2.0);
-    const double areaH  = std::max(1.0, pMonitor->m_size.y - margin * 2.0);
-    const double cellW  = std::max(1.0, (areaW - gap * (cols - 1)) / cols);
-    const double cellH  = std::max(1.0, (areaH - gap * (rows - 1)) / rows);
-    const int    col    = index % cols;
-    const int    row    = index / cols;
+    const double margin = static_cast<double>(std::max<Config::INTEGER>(0, *PMARGIN()));
+    const double gap =
+        static_cast<double>(std::max<Config::INTEGER>(0, *PANIMATIONWORKSPACEZOOMGAP()));
+    const double areaW = std::max(1.0, pMonitor->m_size.x - margin * 2.0);
+    const double areaH = std::max(1.0, pMonitor->m_size.y - margin * 2.0);
+    const double cellW = std::max(1.0, (areaW - gap * (cols - 1)) / cols);
+    const double cellH = std::max(1.0, (areaH - gap * (rows - 1)) / rows);
+    const int    col   = index % cols;
+    const int    row   = index / cols;
 
     return {margin + col * (cellW + gap), margin + row * (cellH + gap), cellW, cellH};
 }
@@ -1161,17 +1571,18 @@ CBox CWindowOverview::workspaceZoomCameraBoxForPanelBox(const CBox& panelBox,
     };
 }
 
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
 CBox CWindowOverview::animatedTileLogicalBox(size_t index, double progress) const {
     if (index >= previews.size())
         return {};
 
     if (!animationUsesWorkspaceZoom(overviewAnimation()))
-        return previews[index].tileLogical;
+        return filterTransitionTileLogicalBox(previews[index]);
 
     const auto& PREVIEW = previews[index];
     const auto  SPLIT   = workspaceZoomStageRatio();
     const auto  PANEL   = workspacePanelBoxForPreview(PREVIEW);
-    const auto  FINAL   = PREVIEW.tileLogical;
+    const auto  FINAL   = filterTransitionTileLogicalBox(PREVIEW);
     const auto  RAW     = rawProgressForVisibleAmount(progress, closing);
 
     if (closing) {
@@ -1189,6 +1600,7 @@ CBox CWindowOverview::animatedTileLogicalBox(size_t index, double progress) cons
     return lerpBox(PANEL, FINAL, easeOutCubic((RAW - SPLIT) / (1.0 - SPLIT)));
 }
 
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
 double CWindowOverview::animatedTileTextureAlpha(size_t index, double progress) const {
     if (index >= previews.size())
         return 0.0;
@@ -1197,6 +1609,29 @@ double CWindowOverview::animatedTileTextureAlpha(size_t index, double progress) 
         return progress;
 
     return 1.0;
+}
+
+CBox CWindowOverview::filterTransitionTileLogicalBox(const SWindowPreview& preview) const {
+    if (closing || !filterAnimating)
+        return preview.tileLogical;
+
+    return lerpBox(preview.filterStartLogical, preview.tileLogical,
+                   filterTransitionVisibleAmount());
+}
+
+double CWindowOverview::filterTransitionVisibleAmount() const {
+    if (!filterAnimating)
+        return 1.0;
+
+    const double DURATION =
+        static_cast<double>(std::max<Config::INTEGER>(0, *PFILTERANIMATIONMS()));
+    if (DURATION <= 0.0)
+        return 1.0;
+
+    const auto ELAPSED =
+        std::chrono::duration<double, std::milli>(Time::steadyNow() - filterAnimationStartedAt)
+            .count();
+    return easeOutCubic(ELAPSED / DURATION);
 }
 
 bool CWindowOverview::animationComplete() const {
@@ -1215,7 +1650,7 @@ bool CWindowOverview::animationComplete() const {
 }
 
 bool CWindowOverview::isAnimating() const {
-    return !animationComplete();
+    return !animationComplete() || (filterAnimating && filterTransitionVisibleAmount() < 1.0);
 }
 
 bool CWindowOverview::backgroundBlurEnabled() const {
@@ -1238,11 +1673,14 @@ bool CWindowOverview::handleKey(const IKeyboard::SKeyEvent& event) {
     const auto MODS    = g_pInputManager->getModsFromAllKBs();
     const auto KEYS    = activeKeyConfig();
 
+    if (filterMode)
+        return handleFilterKey(event, KEYSYM, MODS, KEYS);
+
     const bool RECOGNIZED = matchesKeySet(KEYS.left, KEYSYM, MODS) ||
         matchesKeySet(KEYS.right, KEYSYM, MODS) || matchesKeySet(KEYS.up, KEYSYM, MODS) ||
         matchesKeySet(KEYS.down, KEYSYM, MODS) || matchesKeySet(KEYS.go, KEYSYM, MODS) ||
         matchesKeySet(KEYS.bring, KEYSYM, MODS) || matchesKeySet(KEYS.bringReplace, KEYSYM, MODS) ||
-        matchesKeySet(KEYS.close, KEYSYM, MODS);
+        matchesKeySet(KEYS.close, KEYSYM, MODS) || matchesKeySet(KEYS.filterToggle, KEYSYM, MODS);
 
     if (!RECOGNIZED)
         return false;
@@ -1266,11 +1704,91 @@ bool CWindowOverview::handleKey(const IKeyboard::SKeyEvent& event) {
         runSelected(false);
     else if (matchesKeySet(KEYS.close, KEYSYM, MODS))
         close(false);
+    else if (matchesKeySet(KEYS.filterToggle, KEYSYM, MODS))
+        toggleFilterMode();
 
     return true;
 }
 
-void CWindowOverview::focusWindow(PHLWINDOW window, bool bring, bool replaceInitial) {
+bool CWindowOverview::handleFilterKey(const IKeyboard::SKeyEvent& event, xkb_keysym_t keysym,
+                                      uint32_t mods, const SWinviewKeyConfig& keys) {
+    if (event.state != WL_KEYBOARD_KEY_STATE_PRESSED)
+        return true;
+
+    if (matchesKeySet(keys.filterToggle, keysym, mods)) {
+        toggleFilterMode();
+        return true;
+    }
+
+    if (keysym == XKB_KEY_Escape) {
+        if (!filterQuery.empty())
+            setFilterQuery("");
+        else
+            filterMode = false;
+        damage();
+        return true;
+    }
+
+    const bool RETURN_KEY = keysym == XKB_KEY_Return || keysym == XKB_KEY_KP_Enter;
+    if (RETURN_KEY && matchesKeySet(keys.bringReplace, keysym, mods)) {
+        runSelected(true, true);
+        return true;
+    }
+
+    if (RETURN_KEY && matchesKeySet(keys.bring, keysym, mods)) {
+        runSelected(true);
+        return true;
+    }
+
+    if (RETURN_KEY && matchesKeySet(keys.go, keysym, mods)) {
+        runSelected(false);
+        return true;
+    }
+
+    if (keysym == XKB_KEY_BackSpace) {
+        if (!filterQuery.empty()) {
+            auto query = filterQuery;
+            query.pop_back();
+            setFilterQuery(std::move(query));
+        }
+        return true;
+    }
+
+    if (keysym == XKB_KEY_Delete) {
+        setFilterQuery("");
+        return true;
+    }
+
+    if ((mods & HL_MODIFIER_CTRL) != 0 &&
+        xkb_keysym_to_lower(keysym) == xkb_keysym_to_lower(XKB_KEY_u)) {
+        setFilterQuery("");
+        return true;
+    }
+
+    const auto TEXT = printableTextForKeysym(keysym, mods);
+    if (!TEXT.empty()) {
+        setFilterQuery(filterQuery + TEXT);
+        return true;
+    }
+
+    return true;
+}
+
+void CWindowOverview::toggleFilterMode() {
+    filterMode = !filterMode;
+    damage();
+}
+
+void CWindowOverview::setFilterQuery(std::string query, bool animate) {
+    if (filterQuery == query)
+        return;
+
+    filterQuery = std::move(query);
+    rebuildVisiblePreviews(animate);
+    damage();
+}
+
+void CWindowOverview::focusWindow(const PHLWINDOW& window, bool bring, bool replaceInitial) {
     if (!window || !window->m_workspace)
         return;
 

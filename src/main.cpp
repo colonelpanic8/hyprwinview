@@ -34,7 +34,7 @@ static void failNotif(const std::string& reason) {
                                  CHyprColor{1.0, 0.2, 0.2, 1.0}, 5000);
 }
 
-static bool addConfigValue(SP<Config::Values::IValue> value) {
+static bool addConfigValue(const SP<Config::Values::IValue>& value) {
     const auto RET = Config::mgr()->registerPluginValue(PHANDLE, value);
     if (!RET) {
         Log::logger->log(Log::ERR, "[hyprwinview] failed to register plugin value \"{}\": {}",
@@ -81,7 +81,9 @@ static std::vector<std::string> argTokens(const std::string& arg) {
 static bool isDispatcherAction(const std::string& token) {
     return token == "select" || token == "bring" || token == "bring-replace" ||
         token == "replace" || token == "off" || token == "close" || token == "disable" ||
-        token == "toggle" || token == "open" || token == "show" || token == "on";
+        token == "toggle" || token == "open" || token == "show" || token == "on" ||
+        token == "toggle-filter" || token == "filter-toggle" || token == "toggle-search" ||
+        token == "search-toggle";
 }
 
 static bool applyOverviewOption(const std::string& token, SWindowOverviewOptions& options) {
@@ -97,6 +99,19 @@ static bool applyOverviewOption(const std::string& token, SWindowOverviewOptions
         token == "with-current-workspace" || token == "current-workspace" ||
         token == "include-current-workspace=true" || token == "current-workspace=true") {
         options.includeCurrentWorkspace = true;
+        return true;
+    }
+
+    if (token == "filter" || token == "search" || token == "start-filter" ||
+        token == "start-in-filter-mode" || token == "filter-mode" || token == "start-filter=true" ||
+        token == "filter-mode=true") {
+        options.startInFilterMode = true;
+        return true;
+    }
+
+    if (token == "normal" || token == "navigation" || token == "nav" ||
+        token == "start-filter=false" || token == "filter-mode=false") {
+        options.startInFilterMode = false;
         return true;
     }
 
@@ -130,7 +145,7 @@ static std::optional<SWinviewDispatcherArgs> parseWinviewDispatcherArgs(const st
     return args;
 }
 
-static SDispatchResult onWinviewDispatcher(std::string arg) {
+static SDispatchResult onWinviewDispatcher(const std::string& arg) {
     std::string error;
     const auto  ARGS = parseWinviewDispatcherArgs(arg, error);
     if (!ARGS)
@@ -173,6 +188,22 @@ static SDispatchResult onWinviewDispatcher(std::string arg) {
         return {};
     }
 
+    if (ACTION == "toggle-filter" || ACTION == "filter-toggle" || ACTION == "toggle-search" ||
+        ACTION == "search-toggle") {
+        if (g_pWindowOverview)
+            g_pWindowOverview->toggleFilterMode();
+        else {
+            const auto MONITOR = Desktop::focusState()->monitor();
+            if (!MONITOR)
+                return {.success = false, .error = "no focused monitor"};
+
+            auto options              = ARGS->options;
+            options.startInFilterMode = true;
+            g_pWindowOverview         = std::make_unique<CWindowOverview>(MONITOR, options);
+        }
+        return {};
+    }
+
     const auto MONITOR = Desktop::focusState()->monitor();
     if (!MONITOR)
         return {.success = false, .error = "no focused monitor"};
@@ -210,6 +241,22 @@ static int luaWinviewOverview(lua_State* L) {
                     L,
                     "hyprwinview.overview: field \"include_current_workspace\" must be a boolean");
             lua_pop(L, 1);
+
+            lua_getfield(L, 1, "filter_mode");
+            if (lua_isboolean(L, -1) && lua_toboolean(L, -1))
+                arg += " filter";
+            else if (!lua_isnil(L, -1) && !lua_isboolean(L, -1))
+                return luaL_error(L,
+                                  "hyprwinview.overview: field \"filter_mode\" must be a boolean");
+            lua_pop(L, 1);
+
+            lua_getfield(L, 1, "start_in_filter_mode");
+            if (lua_isboolean(L, -1) && lua_toboolean(L, -1))
+                arg += " filter";
+            else if (!lua_isnil(L, -1) && !lua_isboolean(L, -1))
+                return luaL_error(
+                    L, "hyprwinview.overview: field \"start_in_filter_mode\" must be a boolean");
+            lua_pop(L, 1);
         } else if (lua_isstring(L, 1))
             arg = lua_tostring(L, 1);
         else
@@ -240,7 +287,7 @@ static std::vector<std::string> luaStringListField(lua_State* L, int tableIdx, c
     result.reserve(LEN);
 
     for (size_t i = 1; i <= LEN; ++i) {
-        lua_rawgeti(L, -1, i);
+        lua_rawgeti(L, -1, static_cast<lua_Integer>(i));
         if (!lua_isstring(L, -1))
             luaL_error(L, "hyprwinview.configure: field \"%s\" item %zu must be a string", field,
                        i);
@@ -261,6 +308,7 @@ static void readKeyTable(lua_State* L, int tableIdx, SWinviewKeyConfig& config) 
     config.bring        = luaStringListField(L, tableIdx, "bring", config.bring);
     config.bringReplace = luaStringListField(L, tableIdx, "bring_replace", config.bringReplace);
     config.close        = luaStringListField(L, tableIdx, "close", config.close);
+    config.filterToggle = luaStringListField(L, tableIdx, "filter_toggle", config.filterToggle);
 
     config.left  = luaStringListField(L, tableIdx, "keys_left", config.left);
     config.right = luaStringListField(L, tableIdx, "keys_right", config.right);
@@ -271,6 +319,8 @@ static void readKeyTable(lua_State* L, int tableIdx, SWinviewKeyConfig& config) 
     config.bringReplace =
         luaStringListField(L, tableIdx, "keys_bring_replace", config.bringReplace);
     config.close = luaStringListField(L, tableIdx, "keys_close", config.close);
+    config.filterToggle =
+        luaStringListField(L, tableIdx, "keys_filter_toggle", config.filterToggle);
 }
 
 static int luaWinviewConfigure(lua_State* L) {
@@ -337,6 +387,8 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
                                                             "bring replace keys", "shift+b"));
     addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprwinview:keys_close",
                                                             "close keys", "escape,q"));
+    addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprwinview:keys_filter_toggle",
+                                                            "filter mode toggle keys", "/"));
     addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprwinview:show_app_icon",
                                                          "show app icon overlays", 0));
     addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprwinview:app_icon_size",
@@ -371,6 +423,20 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         "plugin:hyprwinview:app_icon_backplate_col", "app icon backplate color", 0x66000000));
     addConfigValue(makeShared<Config::Values::CIntValue>(
         "plugin:hyprwinview:app_icon_backplate_padding", "app icon backplate padding", 6));
+    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprwinview:show_window_text",
+                                                         "show window title and class labels", 1));
+    addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprwinview:window_text_font",
+                                                            "window text font", "Sans"));
+    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprwinview:window_text_size",
+                                                         "window text size", 14));
+    addConfigValue(makeShared<Config::Values::CColorValue>("plugin:hyprwinview:window_text_color",
+                                                           "window text color", 0xFFFFFFFF));
+    addConfigValue(makeShared<Config::Values::CColorValue>(
+        "plugin:hyprwinview:window_text_backplate_col", "window text backplate color", 0x99000000));
+    addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprwinview:window_text_padding",
+                                                         "window text padding", 6));
+    addConfigValue(makeShared<Config::Values::CIntValue>(
+        "plugin:hyprwinview:filter_animation_ms", "filter narrowing animation duration", 140));
     addConfigValue(makeShared<Config::Values::CStringValue>(
         "plugin:hyprwinview:animation", "overview animation mode", "workspace_zoom"));
     addConfigValue(makeShared<Config::Values::CIntValue>(

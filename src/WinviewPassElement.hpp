@@ -1,4 +1,5 @@
-#pragma once
+#ifndef HYPRWINVIEW_WINVIEW_PASS_ELEMENT_HPP
+#define HYPRWINVIEW_WINVIEW_PASS_ELEMENT_HPP
 
 #include <hyprland/src/render/pass/PassElement.hpp>
 
@@ -6,20 +7,22 @@ class CWindowOverview;
 
 class CWinviewPassElement : public IPassElement {
   public:
-    CWinviewPassElement()          = default;
-    virtual ~CWinviewPassElement() = default;
+    CWinviewPassElement()           = default;
+    ~CWinviewPassElement() override = default;
 
-    virtual std::vector<UP<IPassElement>> draw() override;
-    virtual bool                          needsLiveBlur() override;
-    virtual bool                          needsPrecomputeBlur() override;
-    virtual std::optional<CBox>           boundingBox() override;
-    virtual CRegion                       opaqueRegion() override;
+    std::vector<UP<IPassElement>> draw() override;
+    bool                          needsLiveBlur() override;
+    bool                          needsPrecomputeBlur() override;
+    std::optional<CBox>           boundingBox() override;
+    CRegion                       opaqueRegion() override;
 
-    virtual const char*                   passName() override {
+    const char*                   passName() override {
         return "CWinviewPassElement";
     }
 
-    virtual ePassElementType type() override {
+    ePassElementType type() override {
         return EK_CUSTOM;
     }
 };
+
+#endif

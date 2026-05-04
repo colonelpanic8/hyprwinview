@@ -3,9 +3,27 @@ on:
 
 jobs:
   build:
-    uses: hyprwm/actions/.github/workflows/nix.yml@main
-    secrets: inherit
-    with:
-      command: |
-        nix flake check -L --keep-going
-        nix build -L .#hyprwinview
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+
+      - name: Run checks
+        run: nix flake check -L --keep-going
+
+      - name: Build plugin
+        run: nix build -L .#hyprwinview -o result
+
+      - name: Prepare artifact
+        run: |
+          mkdir -p artifacts
+          cp -L result/lib/libhyprwinview.so artifacts/
+
+      - name: Upload plugin artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hyprwinview-${{ runner.os }}
+          path: artifacts/libhyprwinview.so
+          if-no-files-found: error

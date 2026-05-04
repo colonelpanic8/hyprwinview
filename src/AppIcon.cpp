@@ -237,6 +237,7 @@ namespace {
         return data;
     }
 
+    // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
     std::optional<std::string> iniValue(const fs::path& path, const std::string& section,
                                         const std::string& key) {
         const auto DATA    = parseIniFile(path);
@@ -463,7 +464,7 @@ namespace {
         if (themeName.empty())
             return std::nullopt;
 
-        const auto CACHE_KEY = themeName;
+        const auto& CACHE_KEY = themeName;
         if (const auto IT = g_iconThemeCache.find(CACHE_KEY); IT != g_iconThemeCache.end())
             return IT->second;
 
@@ -534,10 +535,11 @@ namespace {
         return theme;
     }
 
+    // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
     std::optional<fs::path> findIconInTheme(const std::string& iconName,
                                             const std::string& themeName, int sizePx,
                                             std::unordered_set<std::string>& visited) {
-        const auto VISIT_KEY = themeName;
+        const auto& VISIT_KEY = themeName;
         if (VISIT_KEY.empty() || visited.contains(VISIT_KEY))
             return std::nullopt;
 
@@ -857,7 +859,7 @@ namespace {
         return texture;
     }
 
-    std::vector<std::string> appIdsForWindow(PHLWINDOW window) {
+    std::vector<std::string> appIdsForWindow(const PHLWINDOW& window) {
         std::vector<std::string> ids;
         if (!window)
             return ids;
@@ -878,7 +880,7 @@ namespace {
                 continue;
 
             if (lowercase(trim(entry.substr(0, EQUAL))) == KEY) {
-                const auto ICON = trim(entry.substr(EQUAL + 1));
+                auto ICON = trim(entry.substr(EQUAL + 1));
                 if (!ICON.empty())
                     return ICON;
             }
@@ -888,7 +890,7 @@ namespace {
     }
 }
 
-SP<Render::ITexture> appIconTextureForWindow(PHLWINDOW window, int sizePx) {
+SP<Render::ITexture> appIconTextureForWindow(const PHLWINDOW& window, int sizePx) {
     if (!window || sizePx <= 0)
         return nullptr;
 
