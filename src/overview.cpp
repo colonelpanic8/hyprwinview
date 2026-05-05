@@ -1745,6 +1745,16 @@ bool CWindowOverview::handleFilterKey(const IKeyboard::SKeyEvent& event, xkb_key
         return true;
     }
 
+    if (matchesKeySet(keys.up, keysym, mods)) {
+        moveSelection(0, -1);
+        return true;
+    }
+
+    if (matchesKeySet(keys.down, keysym, mods)) {
+        moveSelection(0, 1);
+        return true;
+    }
+
     if (keysym == XKB_KEY_BackSpace) {
         if (!filterQuery.empty()) {
             auto query = filterQuery;
