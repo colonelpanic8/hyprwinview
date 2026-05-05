@@ -1721,11 +1721,7 @@ bool CWindowOverview::handleFilterKey(const IKeyboard::SKeyEvent& event, xkb_key
     }
 
     if (keysym == XKB_KEY_Escape) {
-        if (!filterQuery.empty())
-            setFilterQuery("");
-        else
-            filterMode = false;
-        damage();
+        close(false);
         return true;
     }
 
@@ -1745,12 +1741,12 @@ bool CWindowOverview::handleFilterKey(const IKeyboard::SKeyEvent& event, xkb_key
         return true;
     }
 
-    if (matchesKeySet(keys.up, keysym, mods)) {
+    if (keysym == XKB_KEY_Up) {
         moveSelection(0, -1);
         return true;
     }
 
-    if (matchesKeySet(keys.down, keysym, mods)) {
+    if (keysym == XKB_KEY_Down) {
         moveSelection(0, 1);
         return true;
     }

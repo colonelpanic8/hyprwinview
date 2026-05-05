@@ -123,11 +123,11 @@ configuration.
 `keys_filter_toggle` enters and leaves filter input mode while the overview is
 open. In filter mode, printable keys update the filter query and only windows
 whose title, class, initial title, or initial class contain all query tokens
-remain in the grid. `Up` and `Down` move through the current matches,
-`Backspace` deletes one character, `Delete` or `Ctrl+u` clears the query,
-`Escape` clears the query or leaves filter mode, and Return selects the current
-match. Leaving filter mode keeps the current narrowed set so normal navigation
-can continue over the matches.
+remain in the grid. The arrow `Up` and `Down` keys move through the current
+matches, `Backspace` deletes one character, `Delete` or `Ctrl+u` clears the
+query, `Escape` closes the overview, and Return selects the current match.
+Leaving filter mode keeps the current narrowed set so normal navigation can
+continue over the matches.
 
 `show_window_text` controls the per-window title/class labels. The text is drawn
 over each window snapshot with a configurable font, size, color, backplate, and
