@@ -340,10 +340,10 @@ SWinviewKeyConfig                       defaultWinviewKeyConfig() {
                               .filterClose        = {"escape", "ctrl+g"},
                               .filterBring        = {"ctrl+b"},
                               .filterBringReplace = {"ctrl+shift+b"},
-                              .filterLeft         = {"left"},
-                              .filterRight        = {"right"},
-                              .filterUp           = {"up", "ctrl+p"},
-                              .filterDown         = {"down", "ctrl+n"},
+                              .filterLeft         = {"left", "ctrl+a"},
+                              .filterRight        = {"right", "ctrl+d"},
+                              .filterUp           = {"up", "ctrl+p", "ctrl+w"},
+                              .filterDown         = {"down", "ctrl+n", "ctrl+s"},
     };
 }
 
@@ -489,10 +489,10 @@ static SWinviewKeyConfig keyConfigFromConfigValues() {
         .filterClose        = keyTokens(configStringOr(PKEYSFILTERCLOSE(), "escape,ctrl+g")),
         .filterBring        = keyTokens(configStringOr(PKEYSFILTERBRING(), "ctrl+b")),
         .filterBringReplace = keyTokens(configStringOr(PKEYSFILTERBRINGREPLACE(), "ctrl+shift+b")),
-        .filterLeft         = keyTokens(configStringOr(PKEYSFILTERLEFT(), "left")),
-        .filterRight        = keyTokens(configStringOr(PKEYSFILTERRIGHT(), "right")),
-        .filterUp           = keyTokens(configStringOr(PKEYSFILTERUP(), "up,ctrl+p")),
-        .filterDown         = keyTokens(configStringOr(PKEYSFILTERDOWN(), "down,ctrl+n")),
+        .filterLeft         = keyTokens(configStringOr(PKEYSFILTERLEFT(), "left,ctrl+a")),
+        .filterRight        = keyTokens(configStringOr(PKEYSFILTERRIGHT(), "right,ctrl+d")),
+        .filterUp           = keyTokens(configStringOr(PKEYSFILTERUP(), "up,ctrl+p,ctrl+w")),
+        .filterDown         = keyTokens(configStringOr(PKEYSFILTERDOWN(), "down,ctrl+n,ctrl+s")),
     };
 }
 

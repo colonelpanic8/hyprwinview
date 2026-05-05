@@ -412,14 +412,14 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     addConfigValue(
         makeShared<Config::Values::CStringValue>("plugin:hyprwinview:keys_filter_bring_replace",
                                                  "filter mode bring replace keys", "ctrl+shift+b"));
-    addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprwinview:keys_filter_left",
-                                                            "filter mode left keys", "left"));
-    addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprwinview:keys_filter_right",
-                                                            "filter mode right keys", "right"));
-    addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprwinview:keys_filter_up",
-                                                            "filter mode up keys", "up,ctrl+p"));
     addConfigValue(makeShared<Config::Values::CStringValue>(
-        "plugin:hyprwinview:keys_filter_down", "filter mode down keys", "down,ctrl+n"));
+        "plugin:hyprwinview:keys_filter_left", "filter mode left keys", "left,ctrl+a"));
+    addConfigValue(makeShared<Config::Values::CStringValue>(
+        "plugin:hyprwinview:keys_filter_right", "filter mode right keys", "right,ctrl+d"));
+    addConfigValue(makeShared<Config::Values::CStringValue>(
+        "plugin:hyprwinview:keys_filter_up", "filter mode up keys", "up,ctrl+p,ctrl+w"));
+    addConfigValue(makeShared<Config::Values::CStringValue>(
+        "plugin:hyprwinview:keys_filter_down", "filter mode down keys", "down,ctrl+n,ctrl+s"));
     addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprwinview:show_app_icon",
                                                          "show app icon overlays", 0));
     addConfigValue(makeShared<Config::Values::CIntValue>("plugin:hyprwinview:app_icon_size",
