@@ -10,6 +10,7 @@ The current version is a first working foundation:
 - focuses the hovered window
 - can bring the hovered window to the current workspace before focusing it
 - supports keyboard navigation while the overview is active
+- shows window title/class labels and supports type-to-filter narrowing
 
 ## Build
 
@@ -61,6 +62,7 @@ hl.config({
             hover_border_col = "rgba(66ccffee)",
             border_size = 3,
             window_order = "natural",
+            keys_filter_toggle = "/",
             show_app_icon = 1,
             app_icon_size = 48,
             app_icon_theme = "",
@@ -77,6 +79,13 @@ hl.config({
             app_icon_offset_y = 0,
             app_icon_backplate_col = "rgba(00000066)",
             app_icon_backplate_padding = 6,
+            show_window_text = 1,
+            window_text_font = "Sans",
+            window_text_size = 14,
+            window_text_color = "rgba(ffffffff)",
+            window_text_backplate_col = "rgba(00000099)",
+            window_text_padding = 6,
+            filter_animation_ms = 140,
             animation = "workspace_zoom",
             animation_in_ms = 180,
             animation_out_ms = 140,
@@ -99,6 +108,7 @@ hl.plugin.hyprwinview.configure({
         bring = { "b", "shift+return", "shift+space" },
         bring_replace = { "shift + b" },
         close = { "escape", "q" },
+        filter_toggle = { "/" },
     },
 })
 ```
@@ -109,6 +119,19 @@ example `shift+return` or `shift + b`. Modifier matching is exact for Shift,
 Ctrl, Alt, and Super, so `b` and `shift + b` can trigger different actions. The
 scalar `keys_*` plugin options still work as a fallback for hyprlang-style
 configuration.
+
+`keys_filter_toggle` enters and leaves filter input mode while the overview is
+open. In filter mode, printable keys update the filter query and only windows
+whose title, class, initial title, or initial class contain all query tokens
+remain in the grid. `Backspace` deletes one character, `Delete` or `Ctrl+u`
+clears the query, `Escape` clears the query or leaves filter mode, and Return
+selects the current match. Leaving filter mode keeps the current narrowed set so
+normal navigation can continue over the matches.
+
+`show_window_text` controls the per-window title/class labels. The text is drawn
+over each window snapshot with a configurable font, size, color, backplate, and
+padding. `filter_animation_ms` controls the short transition used when filter
+matches narrow or expand the grid.
 
 `background` controls the full-screen overview tint. Use a low alpha like
 `rgba(10101466)` to leave the wallpaper visible, `rgba(10101400)` for no tint,
@@ -162,6 +185,8 @@ On Hyprland 0.54 and older hyprlang configs, the same options live under
 ```hyprlang
 hyprwinview:overview toggle
 hyprwinview:overview toggle other-workspaces
+hyprwinview:overview toggle filter
+hyprwinview:overview toggle-filter
 hyprwinview:overview toggle exclude-current-workspace
 hyprwinview:overview select
 hyprwinview:overview bring
@@ -176,12 +201,19 @@ currently active workspace when opening the overview. `open`, `show`, and `on`
 are also accepted when you want to open or replace the overview instead of
 toggling it closed.
 
+Add `filter`, `search`, `start-filter`, or `start-in-filter-mode` when opening
+the overview to begin in filter input mode instead of normal navigation mode.
+Use `toggle-filter`, `filter-toggle`, `toggle-search`, or `search-toggle` to
+toggle filter input mode on the active overview, or to open directly into filter
+input mode if the overview is not already open.
+
 The Lua function accepts the same string arguments, or a table:
 
 ```lua
 hl.plugin.hyprwinview.overview({
     action = "toggle",
     include_current_workspace = false,
+    filter_mode = true,
 })
 ```
 
