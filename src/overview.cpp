@@ -21,6 +21,7 @@
 #include <hyprland/src/desktop/view/Window.hpp>
 #include <hyprland/src/helpers/time/Time.hpp>
 #include <hyprland/src/layout/LayoutManager.hpp>
+#include <hyprland/src/managers/eventLoop/EventLoopManager.hpp>
 #include <hyprland/src/managers/input/InputManager.hpp>
 #include <hyprland/src/managers/SeatManager.hpp>
 #include <hyprland/src/render/OpenGL.hpp>
@@ -121,6 +122,26 @@ static const CConfigValue<Config::STRING>& PKEYSCLOSE() {
 
 static const CConfigValue<Config::STRING>& PKEYSFILTERTOGGLE() {
     static const CConfigValue<Config::STRING> VALUE("plugin:hyprwinview:keys_filter_toggle");
+    return VALUE;
+}
+
+static const CConfigValue<Config::STRING>& PKEYSFILTERLEFT() {
+    static const CConfigValue<Config::STRING> VALUE("plugin:hyprwinview:keys_filter_left");
+    return VALUE;
+}
+
+static const CConfigValue<Config::STRING>& PKEYSFILTERRIGHT() {
+    static const CConfigValue<Config::STRING> VALUE("plugin:hyprwinview:keys_filter_right");
+    return VALUE;
+}
+
+static const CConfigValue<Config::STRING>& PKEYSFILTERUP() {
+    static const CConfigValue<Config::STRING> VALUE("plugin:hyprwinview:keys_filter_up");
+    return VALUE;
+}
+
+static const CConfigValue<Config::STRING>& PKEYSFILTERDOWN() {
+    static const CConfigValue<Config::STRING> VALUE("plugin:hyprwinview:keys_filter_down");
     return VALUE;
 }
 
@@ -301,6 +322,10 @@ SWinviewKeyConfig                       defaultWinviewKeyConfig() {
                               .bringReplace = {"shift+b"},
                               .close        = {"escape", "q"},
                               .filterToggle = {"/"},
+                              .filterLeft   = {"left"},
+                              .filterRight  = {"right"},
+                              .filterUp     = {"up", "ctrl+p"},
+                              .filterDown   = {"down", "ctrl+n"},
     };
 }
 
@@ -443,6 +468,10 @@ static SWinviewKeyConfig keyConfigFromConfigValues() {
         .bringReplace = keyTokens(configStringOr(PKEYSBRINGREPLACE(), "shift+b")),
         .close        = keyTokens(configStringOr(PKEYSCLOSE(), "escape,q")),
         .filterToggle = keyTokens(configStringOr(PKEYSFILTERTOGGLE(), "/")),
+        .filterLeft   = keyTokens(configStringOr(PKEYSFILTERLEFT(), "left")),
+        .filterRight  = keyTokens(configStringOr(PKEYSFILTERRIGHT(), "right")),
+        .filterUp     = keyTokens(configStringOr(PKEYSFILTERUP(), "up,ctrl+p")),
+        .filterDown   = keyTokens(configStringOr(PKEYSFILTERDOWN(), "down,ctrl+n")),
     };
 }
 
@@ -957,6 +986,11 @@ CWindowOverview::CWindowOverview(const PHLMONITOR& monitor, SWindowOverviewOptio
 }
 
 CWindowOverview::~CWindowOverview() {
+    stopFilterDeleteRepeat();
+    if (filterDeleteRepeatTimer && g_pEventLoopManager)
+        g_pEventLoopManager->removeTimer(filterDeleteRepeatTimer);
+    filterDeleteRepeatTimer.reset();
+
     Render::GL::g_pHyprOpenGL->makeEGLCurrent();
     for (auto& preview : allPreviews)
         preview.fb.reset();
@@ -1723,6 +1757,13 @@ bool CWindowOverview::handleKey(const IKeyboard::SKeyEvent& event) {
 bool CWindowOverview::handleFilterKey(const IKeyboard::SKeyEvent& event, xkb_keysym_t keysym,
                                       xkb_state* keyboardState, uint32_t mods,
                                       const SWinviewKeyConfig& keys) {
+    const bool DELETE_KEY = keysym == XKB_KEY_BackSpace || keysym == XKB_KEY_Delete;
+    if (event.state == WL_KEYBOARD_KEY_STATE_RELEASED) {
+        if (DELETE_KEY)
+            stopFilterDeleteRepeat();
+        return true;
+    }
+
     if (event.state != WL_KEYBOARD_KEY_STATE_PRESSED)
         return true;
 
@@ -1752,27 +1793,29 @@ bool CWindowOverview::handleFilterKey(const IKeyboard::SKeyEvent& event, xkb_key
         return true;
     }
 
-    if (keysym == XKB_KEY_Up) {
+    if (matchesKeySet(keys.filterLeft, keysym, mods)) {
+        moveSelection(-1, 0);
+        return true;
+    }
+
+    if (matchesKeySet(keys.filterRight, keysym, mods)) {
+        moveSelection(1, 0);
+        return true;
+    }
+
+    if (matchesKeySet(keys.filterUp, keysym, mods)) {
         moveSelection(0, -1);
         return true;
     }
 
-    if (keysym == XKB_KEY_Down) {
+    if (matchesKeySet(keys.filterDown, keysym, mods)) {
         moveSelection(0, 1);
         return true;
     }
 
-    if (keysym == XKB_KEY_BackSpace) {
-        if (!filterQuery.empty()) {
-            auto query = filterQuery;
-            query.pop_back();
-            setFilterQuery(std::move(query));
-        }
-        return true;
-    }
-
-    if (keysym == XKB_KEY_Delete) {
-        setFilterQuery("");
+    if (DELETE_KEY) {
+        deleteFilterCharacter();
+        startFilterDeleteRepeat();
         return true;
     }
 
@@ -1789,6 +1832,44 @@ bool CWindowOverview::handleFilterKey(const IKeyboard::SKeyEvent& event, xkb_key
     }
 
     return true;
+}
+
+bool CWindowOverview::deleteFilterCharacter() {
+    if (filterQuery.empty())
+        return false;
+
+    auto query = filterQuery;
+    query.pop_back();
+    setFilterQuery(std::move(query));
+    return true;
+}
+
+void CWindowOverview::startFilterDeleteRepeat() {
+    filterDeleteHeld = true;
+
+    if (!filterDeleteRepeatTimer) {
+        filterDeleteRepeatTimer = makeShared<CEventLoopTimer>(
+            std::nullopt,
+            [this](SP<CEventLoopTimer> self, void*) {
+                if (!filterDeleteHeld || closing)
+                    return;
+
+                deleteFilterCharacter();
+                self->updateTimeout(std::chrono::milliseconds(35));
+            },
+            nullptr);
+
+        if (g_pEventLoopManager)
+            g_pEventLoopManager->addTimer(filterDeleteRepeatTimer);
+    }
+
+    filterDeleteRepeatTimer->updateTimeout(std::chrono::milliseconds(300));
+}
+
+void CWindowOverview::stopFilterDeleteRepeat() {
+    filterDeleteHeld = false;
+    if (filterDeleteRepeatTimer)
+        filterDeleteRepeatTimer->updateTimeout(std::nullopt);
 }
 
 void CWindowOverview::toggleFilterMode() {
@@ -1858,6 +1939,8 @@ void CWindowOverview::close(bool focusSelection, bool bringSelection,
                             bool replaceInitialSelection) {
     if (closing)
         return;
+
+    stopFilterDeleteRepeat();
 
     closing            = true;
     animationStartedAt = Time::steadyNow();

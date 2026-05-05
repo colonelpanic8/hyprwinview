@@ -22,12 +22,18 @@ struct SWinviewKeyConfig {
     std::vector<std::string> bringReplace;
     std::vector<std::string> close;
     std::vector<std::string> filterToggle;
+    std::vector<std::string> filterLeft;
+    std::vector<std::string> filterRight;
+    std::vector<std::string> filterUp;
+    std::vector<std::string> filterDown;
 };
 
 struct SWindowOverviewOptions {
     bool includeCurrentWorkspace = true;
     bool startInFilterMode       = false;
 };
+
+class CEventLoopTimer;
 
 SWinviewKeyConfig defaultWinviewKeyConfig();
 void              setWinviewKeyConfig(SWinviewKeyConfig config);
@@ -74,6 +80,9 @@ class CWindowOverview {
     bool                handleKey(const IKeyboard::SKeyEvent& event);
     bool                handleFilterKey(const IKeyboard::SKeyEvent& event, xkb_keysym_t keysym,
                                         xkb_state* keyboardState, uint32_t mods, const SWinviewKeyConfig& keys);
+    bool                deleteFilterCharacter();
+    void                startFilterDeleteRepeat();
+    void                stopFilterDeleteRepeat();
     void                setFilterQuery(std::string query, bool animate = true);
     void                finishClose();
     double              animationVisibleAmount() const;
@@ -108,9 +117,11 @@ class CWindowOverview {
     bool                                  closing            = false;
     bool                                  filterMode         = false;
     bool                                  filterAnimating    = false;
+    bool                                  filterDeleteHeld   = false;
     std::chrono::steady_clock::time_point animationStartedAt;
     std::chrono::steady_clock::time_point filterAnimationStartedAt;
 
+    SP<CEventLoopTimer>                   filterDeleteRepeatTimer;
     CHyprSignalListener                   mouseMoveHook;
     CHyprSignalListener                   mouseButtonHook;
     CHyprSignalListener                   keyboardHook;
