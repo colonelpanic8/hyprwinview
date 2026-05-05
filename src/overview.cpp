@@ -125,6 +125,11 @@ static const CConfigValue<Config::STRING>& PKEYSFILTERTOGGLE() {
     return VALUE;
 }
 
+static const CConfigValue<Config::STRING>& PKEYSFILTERCLOSE() {
+    static const CConfigValue<Config::STRING> VALUE("plugin:hyprwinview:keys_filter_close");
+    return VALUE;
+}
+
 static const CConfigValue<Config::STRING>& PKEYSFILTERLEFT() {
     static const CConfigValue<Config::STRING> VALUE("plugin:hyprwinview:keys_filter_left");
     return VALUE;
@@ -322,6 +327,7 @@ SWinviewKeyConfig                       defaultWinviewKeyConfig() {
                               .bringReplace = {"shift+b"},
                               .close        = {"escape", "q"},
                               .filterToggle = {"/"},
+                              .filterClose  = {"escape", "ctrl+g"},
                               .filterLeft   = {"left"},
                               .filterRight  = {"right"},
                               .filterUp     = {"up", "ctrl+p"},
@@ -468,6 +474,7 @@ static SWinviewKeyConfig keyConfigFromConfigValues() {
         .bringReplace = keyTokens(configStringOr(PKEYSBRINGREPLACE(), "shift+b")),
         .close        = keyTokens(configStringOr(PKEYSCLOSE(), "escape,q")),
         .filterToggle = keyTokens(configStringOr(PKEYSFILTERTOGGLE(), "/")),
+        .filterClose  = keyTokens(configStringOr(PKEYSFILTERCLOSE(), "escape,ctrl+g")),
         .filterLeft   = keyTokens(configStringOr(PKEYSFILTERLEFT(), "left")),
         .filterRight  = keyTokens(configStringOr(PKEYSFILTERRIGHT(), "right")),
         .filterUp     = keyTokens(configStringOr(PKEYSFILTERUP(), "up,ctrl+p")),
@@ -1767,13 +1774,13 @@ bool CWindowOverview::handleFilterKey(const IKeyboard::SKeyEvent& event, xkb_key
     if (event.state != WL_KEYBOARD_KEY_STATE_PRESSED)
         return true;
 
-    if (matchesKeySet(keys.filterToggle, keysym, mods)) {
-        toggleFilterMode();
+    if (matchesKeySet(keys.filterClose, keysym, mods)) {
+        close(false);
         return true;
     }
 
-    if (keysym == XKB_KEY_Escape) {
-        close(false);
+    if (matchesKeySet(keys.filterToggle, keysym, mods)) {
+        toggleFilterMode();
         return true;
     }
 

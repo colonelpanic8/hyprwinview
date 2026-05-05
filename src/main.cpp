@@ -309,6 +309,7 @@ static void readKeyTable(lua_State* L, int tableIdx, SWinviewKeyConfig& config) 
     config.bringReplace = luaStringListField(L, tableIdx, "bring_replace", config.bringReplace);
     config.close        = luaStringListField(L, tableIdx, "close", config.close);
     config.filterToggle = luaStringListField(L, tableIdx, "filter_toggle", config.filterToggle);
+    config.filterClose  = luaStringListField(L, tableIdx, "filter_close", config.filterClose);
     config.filterLeft   = luaStringListField(L, tableIdx, "filter_left", config.filterLeft);
     config.filterRight  = luaStringListField(L, tableIdx, "filter_right", config.filterRight);
     config.filterUp     = luaStringListField(L, tableIdx, "filter_up", config.filterUp);
@@ -325,6 +326,7 @@ static void readKeyTable(lua_State* L, int tableIdx, SWinviewKeyConfig& config) 
     config.close = luaStringListField(L, tableIdx, "keys_close", config.close);
     config.filterToggle =
         luaStringListField(L, tableIdx, "keys_filter_toggle", config.filterToggle);
+    config.filterClose = luaStringListField(L, tableIdx, "keys_filter_close", config.filterClose);
     config.filterLeft  = luaStringListField(L, tableIdx, "keys_filter_left", config.filterLeft);
     config.filterRight = luaStringListField(L, tableIdx, "keys_filter_right", config.filterRight);
     config.filterUp    = luaStringListField(L, tableIdx, "keys_filter_up", config.filterUp);
@@ -397,6 +399,8 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
                                                             "close keys", "escape,q"));
     addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprwinview:keys_filter_toggle",
                                                             "filter mode toggle keys", "/"));
+    addConfigValue(makeShared<Config::Values::CStringValue>(
+        "plugin:hyprwinview:keys_filter_close", "filter mode close keys", "escape,ctrl+g"));
     addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprwinview:keys_filter_left",
                                                             "filter mode left keys", "left"));
     addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprwinview:keys_filter_right",
