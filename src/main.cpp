@@ -310,10 +310,13 @@ static void readKeyTable(lua_State* L, int tableIdx, SWinviewKeyConfig& config) 
     config.close        = luaStringListField(L, tableIdx, "close", config.close);
     config.filterToggle = luaStringListField(L, tableIdx, "filter_toggle", config.filterToggle);
     config.filterClose  = luaStringListField(L, tableIdx, "filter_close", config.filterClose);
-    config.filterLeft   = luaStringListField(L, tableIdx, "filter_left", config.filterLeft);
-    config.filterRight  = luaStringListField(L, tableIdx, "filter_right", config.filterRight);
-    config.filterUp     = luaStringListField(L, tableIdx, "filter_up", config.filterUp);
-    config.filterDown   = luaStringListField(L, tableIdx, "filter_down", config.filterDown);
+    config.filterBring  = luaStringListField(L, tableIdx, "filter_bring", config.filterBring);
+    config.filterBringReplace =
+        luaStringListField(L, tableIdx, "filter_bring_replace", config.filterBringReplace);
+    config.filterLeft  = luaStringListField(L, tableIdx, "filter_left", config.filterLeft);
+    config.filterRight = luaStringListField(L, tableIdx, "filter_right", config.filterRight);
+    config.filterUp    = luaStringListField(L, tableIdx, "filter_up", config.filterUp);
+    config.filterDown  = luaStringListField(L, tableIdx, "filter_down", config.filterDown);
 
     config.left  = luaStringListField(L, tableIdx, "keys_left", config.left);
     config.right = luaStringListField(L, tableIdx, "keys_right", config.right);
@@ -327,6 +330,9 @@ static void readKeyTable(lua_State* L, int tableIdx, SWinviewKeyConfig& config) 
     config.filterToggle =
         luaStringListField(L, tableIdx, "keys_filter_toggle", config.filterToggle);
     config.filterClose = luaStringListField(L, tableIdx, "keys_filter_close", config.filterClose);
+    config.filterBring = luaStringListField(L, tableIdx, "keys_filter_bring", config.filterBring);
+    config.filterBringReplace =
+        luaStringListField(L, tableIdx, "keys_filter_bring_replace", config.filterBringReplace);
     config.filterLeft  = luaStringListField(L, tableIdx, "keys_filter_left", config.filterLeft);
     config.filterRight = luaStringListField(L, tableIdx, "keys_filter_right", config.filterRight);
     config.filterUp    = luaStringListField(L, tableIdx, "keys_filter_up", config.filterUp);
@@ -401,6 +407,11 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
                                                             "filter mode toggle keys", "/"));
     addConfigValue(makeShared<Config::Values::CStringValue>(
         "plugin:hyprwinview:keys_filter_close", "filter mode close keys", "escape,ctrl+g"));
+    addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprwinview:keys_filter_bring",
+                                                            "filter mode bring keys", "ctrl+b"));
+    addConfigValue(
+        makeShared<Config::Values::CStringValue>("plugin:hyprwinview:keys_filter_bring_replace",
+                                                 "filter mode bring replace keys", "ctrl+shift+b"));
     addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprwinview:keys_filter_left",
                                                             "filter mode left keys", "left"));
     addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprwinview:keys_filter_right",

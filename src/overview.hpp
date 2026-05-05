@@ -23,6 +23,8 @@ struct SWinviewKeyConfig {
     std::vector<std::string> close;
     std::vector<std::string> filterToggle;
     std::vector<std::string> filterClose;
+    std::vector<std::string> filterBring;
+    std::vector<std::string> filterBringReplace;
     std::vector<std::string> filterLeft;
     std::vector<std::string> filterRight;
     std::vector<std::string> filterUp;

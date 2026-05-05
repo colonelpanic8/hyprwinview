@@ -130,6 +130,16 @@ static const CConfigValue<Config::STRING>& PKEYSFILTERCLOSE() {
     return VALUE;
 }
 
+static const CConfigValue<Config::STRING>& PKEYSFILTERBRING() {
+    static const CConfigValue<Config::STRING> VALUE("plugin:hyprwinview:keys_filter_bring");
+    return VALUE;
+}
+
+static const CConfigValue<Config::STRING>& PKEYSFILTERBRINGREPLACE() {
+    static const CConfigValue<Config::STRING> VALUE("plugin:hyprwinview:keys_filter_bring_replace");
+    return VALUE;
+}
+
 static const CConfigValue<Config::STRING>& PKEYSFILTERLEFT() {
     static const CConfigValue<Config::STRING> VALUE("plugin:hyprwinview:keys_filter_left");
     return VALUE;
@@ -318,20 +328,22 @@ static constexpr uint64_t               DEFAULT_BACKGROUND = 0x99101014;
 
 SWinviewKeyConfig                       defaultWinviewKeyConfig() {
     return {
-                              .left         = {"a", "h", "left"},
-                              .right        = {"d", "l", "right"},
-                              .up           = {"w", "k", "up"},
-                              .down         = {"s", "j", "down"},
-                              .go           = {"return", "enter", "space", "g", "f"},
-                              .bring        = {"b", "shift+return", "shift+space"},
-                              .bringReplace = {"shift+b"},
-                              .close        = {"escape", "q"},
-                              .filterToggle = {"/"},
-                              .filterClose  = {"escape", "ctrl+g"},
-                              .filterLeft   = {"left"},
-                              .filterRight  = {"right"},
-                              .filterUp     = {"up", "ctrl+p"},
-                              .filterDown   = {"down", "ctrl+n"},
+                              .left               = {"a", "h", "left"},
+                              .right              = {"d", "l", "right"},
+                              .up                 = {"w", "k", "up"},
+                              .down               = {"s", "j", "down"},
+                              .go                 = {"return", "enter", "space", "g", "f"},
+                              .bring              = {"b", "shift+return", "shift+space"},
+                              .bringReplace       = {"shift+b"},
+                              .close              = {"escape", "q"},
+                              .filterToggle       = {"/"},
+                              .filterClose        = {"escape", "ctrl+g"},
+                              .filterBring        = {"ctrl+b"},
+                              .filterBringReplace = {"ctrl+shift+b"},
+                              .filterLeft         = {"left"},
+                              .filterRight        = {"right"},
+                              .filterUp           = {"up", "ctrl+p"},
+                              .filterDown         = {"down", "ctrl+n"},
     };
 }
 
@@ -465,20 +477,22 @@ static std::string configStringOr(const CConfigValue<Config::STRING>& value,
 
 static SWinviewKeyConfig keyConfigFromConfigValues() {
     return {
-        .left         = keyTokens(configStringOr(PKEYSLEFT(), "a,h,left")),
-        .right        = keyTokens(configStringOr(PKEYSRIGHT(), "d,l,right")),
-        .up           = keyTokens(configStringOr(PKEYSUP(), "w,k,up")),
-        .down         = keyTokens(configStringOr(PKEYSDOWN(), "s,j,down")),
-        .go           = keyTokens(configStringOr(PKEYSGO(), "return,enter,space,g,f")),
-        .bring        = keyTokens(configStringOr(PKEYSBRING(), "b,shift+return,shift+space")),
-        .bringReplace = keyTokens(configStringOr(PKEYSBRINGREPLACE(), "shift+b")),
-        .close        = keyTokens(configStringOr(PKEYSCLOSE(), "escape,q")),
-        .filterToggle = keyTokens(configStringOr(PKEYSFILTERTOGGLE(), "/")),
-        .filterClose  = keyTokens(configStringOr(PKEYSFILTERCLOSE(), "escape,ctrl+g")),
-        .filterLeft   = keyTokens(configStringOr(PKEYSFILTERLEFT(), "left")),
-        .filterRight  = keyTokens(configStringOr(PKEYSFILTERRIGHT(), "right")),
-        .filterUp     = keyTokens(configStringOr(PKEYSFILTERUP(), "up,ctrl+p")),
-        .filterDown   = keyTokens(configStringOr(PKEYSFILTERDOWN(), "down,ctrl+n")),
+        .left               = keyTokens(configStringOr(PKEYSLEFT(), "a,h,left")),
+        .right              = keyTokens(configStringOr(PKEYSRIGHT(), "d,l,right")),
+        .up                 = keyTokens(configStringOr(PKEYSUP(), "w,k,up")),
+        .down               = keyTokens(configStringOr(PKEYSDOWN(), "s,j,down")),
+        .go                 = keyTokens(configStringOr(PKEYSGO(), "return,enter,space,g,f")),
+        .bring              = keyTokens(configStringOr(PKEYSBRING(), "b,shift+return,shift+space")),
+        .bringReplace       = keyTokens(configStringOr(PKEYSBRINGREPLACE(), "shift+b")),
+        .close              = keyTokens(configStringOr(PKEYSCLOSE(), "escape,q")),
+        .filterToggle       = keyTokens(configStringOr(PKEYSFILTERTOGGLE(), "/")),
+        .filterClose        = keyTokens(configStringOr(PKEYSFILTERCLOSE(), "escape,ctrl+g")),
+        .filterBring        = keyTokens(configStringOr(PKEYSFILTERBRING(), "ctrl+b")),
+        .filterBringReplace = keyTokens(configStringOr(PKEYSFILTERBRINGREPLACE(), "ctrl+shift+b")),
+        .filterLeft         = keyTokens(configStringOr(PKEYSFILTERLEFT(), "left")),
+        .filterRight        = keyTokens(configStringOr(PKEYSFILTERRIGHT(), "right")),
+        .filterUp           = keyTokens(configStringOr(PKEYSFILTERUP(), "up,ctrl+p")),
+        .filterDown         = keyTokens(configStringOr(PKEYSFILTERDOWN(), "down,ctrl+n")),
     };
 }
 
@@ -1781,6 +1795,16 @@ bool CWindowOverview::handleFilterKey(const IKeyboard::SKeyEvent& event, xkb_key
 
     if (matchesKeySet(keys.filterToggle, keysym, mods)) {
         toggleFilterMode();
+        return true;
+    }
+
+    if (matchesKeySet(keys.filterBringReplace, keysym, mods)) {
+        runSelected(true, true);
+        return true;
+    }
+
+    if (matchesKeySet(keys.filterBring, keysym, mods)) {
+        runSelected(true);
         return true;
     }
 

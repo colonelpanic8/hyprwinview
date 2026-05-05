@@ -64,6 +64,8 @@ hl.config({
             window_order = "natural",
             keys_filter_toggle = "/",
             keys_filter_close = "escape,ctrl+g",
+            keys_filter_bring = "ctrl+b",
+            keys_filter_bring_replace = "ctrl+shift+b",
             keys_filter_left = "left",
             keys_filter_right = "right",
             keys_filter_up = "up,ctrl+p",
@@ -115,6 +117,8 @@ hl.plugin.hyprwinview.configure({
         close = { "escape", "q" },
         filter_toggle = { "/" },
         filter_close = { "escape", "ctrl+g" },
+        filter_bring = { "ctrl+b" },
+        filter_bring_replace = { "ctrl+shift+b" },
         filter_left = { "left" },
         filter_right = { "right" },
         filter_up = { "up", "ctrl+p" },
@@ -136,9 +140,10 @@ whose title, class, initial title, or initial class contain all query tokens
 remain in the grid. The filter navigation key sets default to the arrow keys,
 with `Ctrl+p` for up and `Ctrl+n` for down. `Backspace` and `Delete` delete one
 character and repeat while held, `Ctrl+u` clears the query, `Escape` or
-`Ctrl+g` closes the overview, and Return selects the current match. Leaving
-filter mode keeps the current narrowed set so normal navigation can continue
-over the matches.
+`Ctrl+g` closes the overview, `Ctrl+b` brings the current match,
+`Ctrl+Shift+b` bring-replaces it, and Return selects it. Leaving filter mode
+keeps the current narrowed set so normal navigation can continue over the
+matches.
 
 `show_window_text` controls the per-window title/class labels. The text is drawn
 over each window snapshot with a configurable font, size, color, backplate, and
