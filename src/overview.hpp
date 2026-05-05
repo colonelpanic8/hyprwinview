@@ -61,25 +61,25 @@ class CWindowOverview {
         size_t                   orderGroupIndex    = 0;
     };
 
-    void   collectWindows();
-    void   applyWindowOrdering(std::vector<SWindowPreview>& windowPreviews);
-    void   rebuildVisiblePreviews(bool animate);
-    void   updateWorkspaceGrid();
-    void   renderSnapshots();
-    void   updateLayout();
-    int    hoveredIndex() const;
-    void   focusWindow(const PHLWINDOW& window, bool bring, bool replaceInitial);
-    void   moveSelection(int dx, int dy);
-    void   runSelected(bool bring, bool replaceInitial = false);
-    bool   handleKey(const IKeyboard::SKeyEvent& event);
-    bool   handleFilterKey(const IKeyboard::SKeyEvent& event, xkb_keysym_t keysym, uint32_t mods,
-                           const SWinviewKeyConfig& keys);
-    void   setFilterQuery(std::string query, bool animate = true);
-    void   finishClose();
-    double animationVisibleAmount() const;
-    double tileAnimationVisibleAmount(size_t index) const;
-    double tileAnimationDelayMs(size_t index) const;
-    double maxTileAnimationDelayMs() const;
+    void                collectWindows();
+    void                applyWindowOrdering(std::vector<SWindowPreview>& windowPreviews);
+    void                rebuildVisiblePreviews(bool animate);
+    void                updateWorkspaceGrid();
+    void                renderSnapshots();
+    void                updateLayout();
+    int                 hoveredIndex() const;
+    void                focusWindow(const PHLWINDOW& window, bool bring, bool replaceInitial);
+    void                moveSelection(int dx, int dy);
+    void                runSelected(bool bring, bool replaceInitial = false);
+    bool                handleKey(const IKeyboard::SKeyEvent& event);
+    bool                handleFilterKey(const IKeyboard::SKeyEvent& event, xkb_keysym_t keysym,
+                                        xkb_state* keyboardState, uint32_t mods, const SWinviewKeyConfig& keys);
+    void                setFilterQuery(std::string query, bool animate = true);
+    void                finishClose();
+    double              animationVisibleAmount() const;
+    double              tileAnimationVisibleAmount(size_t index) const;
+    double              tileAnimationDelayMs(size_t index) const;
+    double              maxTileAnimationDelayMs() const;
     std::pair<int, int> visualCellForPreviewIndex(int index) const;
     int                 previewIndexForVisualCell(int row, int col) const;
     int                 workspacePanelIndexForWorkspace(const PHLWORKSPACE& workspace) const;

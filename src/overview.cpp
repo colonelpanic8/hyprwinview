@@ -505,14 +505,13 @@ static bool windowMatchesQuery(const PHLWINDOW& window, const std::string& query
     });
 }
 
-// NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
-static std::string printableTextForKeysym(xkb_keysym_t keysym, uint32_t mods) {
+static std::string printableTextForKey(xkb_state* state, xkb_keycode_t keycode, uint32_t mods) {
     constexpr uint32_t TEXT_BLOCKING_MODS = HL_MODIFIER_CTRL | HL_MODIFIER_ALT | HL_MODIFIER_META;
-    if ((mods & TEXT_BLOCKING_MODS) != 0)
+    if (!state || (mods & TEXT_BLOCKING_MODS) != 0)
         return "";
 
     char      buffer[64] = {};
-    const int len        = xkb_keysym_to_utf8(keysym, buffer, sizeof(buffer));
+    const int len        = xkb_state_key_get_utf8(state, keycode, buffer, sizeof(buffer));
     if (len <= 0)
         return "";
 
@@ -521,6 +520,19 @@ static std::string printableTextForKeysym(xkb_keysym_t keysym, uint32_t mods) {
         return "";
 
     return result;
+}
+
+static SP<IKeyboard> keyboardForKeyEvent(const IKeyboard::SKeyEvent& event) {
+    if (event.state == WL_KEYBOARD_KEY_STATE_PRESSED) {
+        for (const auto& keyboard : g_pInputManager->m_keyboards) {
+            if (keyboard && keyboard->m_enabled && keyboard->getPressed(event.keycode))
+                return keyboard;
+        }
+    }
+
+    return g_pSeatManager && !g_pSeatManager->m_keyboard.expired() ?
+        g_pSeatManager->m_keyboard.lock() :
+        nullptr;
 }
 
 static std::string uniqueWindowGroupKey(const PHLWINDOW&, size_t originalIndex) {
@@ -1662,9 +1674,7 @@ bool CWindowOverview::occludesScene() const {
 }
 
 bool CWindowOverview::handleKey(const IKeyboard::SKeyEvent& event) {
-    const auto KEYBOARD = g_pSeatManager && !g_pSeatManager->m_keyboard.expired() ?
-        g_pSeatManager->m_keyboard.lock() :
-        nullptr;
+    const auto KEYBOARD = keyboardForKeyEvent(event);
     if (!KEYBOARD || !KEYBOARD->m_xkbState)
         return false;
 
@@ -1674,7 +1684,7 @@ bool CWindowOverview::handleKey(const IKeyboard::SKeyEvent& event) {
     const auto KEYS    = activeKeyConfig();
 
     if (filterMode)
-        return handleFilterKey(event, KEYSYM, MODS, KEYS);
+        return handleFilterKey(event, KEYSYM, KEYBOARD->m_xkbState, MODS, KEYS);
 
     const bool RECOGNIZED = matchesKeySet(KEYS.left, KEYSYM, MODS) ||
         matchesKeySet(KEYS.right, KEYSYM, MODS) || matchesKeySet(KEYS.up, KEYSYM, MODS) ||
@@ -1711,7 +1721,8 @@ bool CWindowOverview::handleKey(const IKeyboard::SKeyEvent& event) {
 }
 
 bool CWindowOverview::handleFilterKey(const IKeyboard::SKeyEvent& event, xkb_keysym_t keysym,
-                                      uint32_t mods, const SWinviewKeyConfig& keys) {
+                                      xkb_state* keyboardState, uint32_t mods,
+                                      const SWinviewKeyConfig& keys) {
     if (event.state != WL_KEYBOARD_KEY_STATE_PRESSED)
         return true;
 
@@ -1771,7 +1782,7 @@ bool CWindowOverview::handleFilterKey(const IKeyboard::SKeyEvent& event, xkb_key
         return true;
     }
 
-    const auto TEXT = printableTextForKeysym(keysym, mods);
+    const auto TEXT = printableTextForKey(keyboardState, event.keycode + 8, mods);
     if (!TEXT.empty()) {
         setFilterQuery(filterQuery + TEXT);
         return true;
