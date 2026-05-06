@@ -12,6 +12,15 @@ The current version is a first working foundation:
 - supports keyboard navigation while the overview is active
 - shows window title/class labels and supports type-to-filter narrowing
 
+## Demo
+
+[![hyprwinview type-to-filter demo](media/reddit/hyprwinview-real-incremental-filter-spo-select.png)](media/reddit/hyprwinview-real-incremental-filter-spo-select.mp4)
+
+The demo opens the overview, narrows the window list by typing `spo`, and
+selects the Spotify window. There is also a
+[`Ctrl+b` bring demo](media/reddit/hyprwinview-real-filter-red-ctrl-b-bring.mp4)
+that pulls a matching window from another workspace into the current workspace.
+
 ## Build
 
 ```sh
