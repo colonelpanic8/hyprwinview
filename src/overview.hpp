@@ -53,8 +53,11 @@ class CWindowOverview {
                         bool replaceInitialSelection = false);
     void          selectHoveredWindow();
     void          toggleFilterMode();
+    void          onDamageReported();
+    void          onPreRender();
     bool          isAnimating() const;
     bool          backgroundBlurEnabled() const;
+    bool          damageReportingBlocked() const;
     bool          occludesScene() const;
 
     PHLMONITORREF pMonitor;
@@ -121,6 +124,8 @@ class CWindowOverview {
     bool                                  filterMode         = false;
     bool                                  filterAnimating    = false;
     bool                                  filterDeleteHeld   = false;
+    bool                                  damageDirty        = false;
+    bool                                  blockDamageReports = false;
     std::chrono::steady_clock::time_point animationStartedAt;
     std::chrono::steady_clock::time_point filterAnimationStartedAt;
 

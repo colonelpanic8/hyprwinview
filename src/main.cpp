@@ -9,10 +9,12 @@
 #include <hyprland/src/debug/log/Logger.hpp>
 #include <hyprland/src/desktop/state/FocusState.hpp>
 #include <hyprland/src/event/EventBus.hpp>
+#include <hyprland/src/helpers/Monitor.hpp>
 #include <hyprland/src/render/OpenGL.hpp>
 #include <hyprland/src/render/Renderer.hpp>
 
 #include <lua.hpp>
+#include <pixman.h>
 
 #include <algorithm>
 #include <cctype>
@@ -49,6 +51,36 @@ struct SWinviewDispatcherArgs {
     std::string            action = "toggle";
     SWindowOverviewOptions options;
 };
+
+inline CFunctionHook* g_pAddDamageHookA = nullptr;
+inline CFunctionHook* g_pAddDamageHookB = nullptr;
+
+using origAddDamageA = void (*)(void*, const CBox&);
+using origAddDamageB = void (*)(void*, const pixman_region32_t*);
+
+static void hkAddDamageA(void* thisptr, const CBox& box) {
+    const auto PMONITOR = (CMonitor*)thisptr;
+
+    if (!g_pWindowOverview || g_pWindowOverview->pMonitor != PMONITOR->m_self ||
+        g_pWindowOverview->damageReportingBlocked()) {
+        ((origAddDamageA)g_pAddDamageHookA->m_original)(thisptr, box);
+        return;
+    }
+
+    g_pWindowOverview->onDamageReported();
+}
+
+static void hkAddDamageB(void* thisptr, const pixman_region32_t* rg) {
+    const auto PMONITOR = (CMonitor*)thisptr;
+
+    if (!g_pWindowOverview || g_pWindowOverview->pMonitor != PMONITOR->m_self ||
+        g_pWindowOverview->damageReportingBlocked()) {
+        ((origAddDamageB)g_pAddDamageHookB->m_original)(thisptr, rg);
+        return;
+    }
+
+    g_pWindowOverview->onDamageReported();
+}
 
 static std::string normalizedArgToken(std::string token) {
     auto notSpace = [](unsigned char c) { return !std::isspace(c); };
@@ -369,6 +401,34 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         throw std::runtime_error("[hyprwinview] Version mismatch");
     }
 
+    auto FNS = HyprlandAPI::findFunctionsByName(PHANDLE, "addDamageEPK15pixman_region32");
+    if (FNS.empty()) {
+        failNotif("no fns for hook addDamageEPK15pixman_region32");
+        throw std::runtime_error("[hyprwinview] No fns for hook addDamageEPK15pixman_region32");
+    }
+
+    g_pAddDamageHookB =
+        HyprlandAPI::createFunctionHook(PHANDLE, FNS[0].address, (void*)hkAddDamageB);
+
+    FNS = HyprlandAPI::findFunctionsByName(PHANDLE,
+                                           "_ZN8CMonitor9addDamageERKN9Hyprutils4Math4CBoxE");
+    if (FNS.empty()) {
+        failNotif("no fns for hook _ZN8CMonitor9addDamageERKN9Hyprutils4Math4CBoxE");
+        throw std::runtime_error(
+            "[hyprwinview] No fns for hook _ZN8CMonitor9addDamageERKN9Hyprutils4Math4CBoxE");
+    }
+
+    g_pAddDamageHookA =
+        HyprlandAPI::createFunctionHook(PHANDLE, FNS[0].address, (void*)hkAddDamageA);
+
+    bool hookSuccess = g_pAddDamageHookA && g_pAddDamageHookB && g_pAddDamageHookA->hook();
+    hookSuccess      = hookSuccess && g_pAddDamageHookB->hook();
+
+    if (!hookSuccess) {
+        failNotif("Failed initializing hooks");
+        throw std::runtime_error("[hyprwinview] Failed initializing hooks");
+    }
+
     addConfigValue(
         makeShared<Config::Values::CIntValue>("plugin:hyprwinview:gap_size", "gap size", 24));
     addConfigValue(
@@ -494,6 +554,11 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         makeShared<Config::Values::CIntValue>("plugin:hyprwinview:animation_workspace_zoom_gap",
                                               "overview workspace_zoom panel gap", 18));
 
+    static auto renderPre = Event::bus()->m_events.render.pre.listen([](const PHLMONITOR& monitor) {
+        if (g_pWindowOverview && g_pWindowOverview->pMonitor == monitor)
+            g_pWindowOverview->onPreRender();
+    });
+
     static auto renderStage = Event::bus()->m_events.render.stage.listen([](eRenderStage stage) {
         if (stage != RENDER_LAST_MOMENT || !g_pWindowOverview)
             return;
@@ -517,4 +582,12 @@ APICALL EXPORT void PLUGIN_EXIT() {
     g_pWindowOverview.reset();
     clearAppIconCache();
     g_pHyprRenderer->m_renderPass.removeAllOfType("CWinviewPassElement");
+    if (g_pAddDamageHookA) {
+        HyprlandAPI::removeFunctionHook(PHANDLE, g_pAddDamageHookA);
+        g_pAddDamageHookA = nullptr;
+    }
+    if (g_pAddDamageHookB) {
+        HyprlandAPI::removeFunctionHook(PHANDLE, g_pAddDamageHookB);
+        g_pAddDamageHookB = nullptr;
+    }
 }
