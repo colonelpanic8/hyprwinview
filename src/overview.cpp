@@ -931,6 +931,19 @@ static bool previewableWindow(const PHLWINDOW& window) {
     return true;
 }
 
+static bool minimizedWorkspace(const PHLWORKSPACE& workspace) {
+    if (!workspace)
+        return false;
+
+    const auto& NAME = workspace->m_name;
+    return NAME == "special:minimized" || NAME == "minimized" ||
+        (workspace->m_isSpecialWorkspace && NAME.find("minimized") != std::string::npos);
+}
+
+static bool minimizedWindow(const PHLWINDOW& window) {
+    return window && minimizedWorkspace(window->m_workspace);
+}
+
 CWindowOverview::CWindowOverview(const PHLMONITOR& monitor, SWindowOverviewOptions options_) :
     pMonitor(monitor), options(options_) {
     animationStartedAt       = Time::steadyNow();
@@ -2008,7 +2021,8 @@ void CWindowOverview::close(bool focusSelection, bool bringSelection,
         selectedWindow = previews[selectedIndex].window;
 
     if (selectedWindow)
-        focusWindow(selectedWindow, bringSelection, replaceInitialSelection);
+        focusWindow(selectedWindow, bringSelection || minimizedWindow(selectedWindow),
+                    replaceInitialSelection);
 
     damage();
 
