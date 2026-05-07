@@ -20,6 +20,7 @@
 #include <cctype>
 #include <optional>
 #include <sstream>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -118,7 +119,29 @@ static bool isDispatcherAction(const std::string& token) {
         token == "search-toggle";
 }
 
+static std::optional<EWinviewDefaultAction> parseDefaultAction(const std::string& value) {
+    if (value == "select" || value == "focus" || value == "go")
+        return EWinviewDefaultAction::SELECT;
+    if (value == "bring")
+        return EWinviewDefaultAction::BRING;
+    if (value == "bring-replace" || value == "replace")
+        return EWinviewDefaultAction::BRING_REPLACE;
+
+    return std::nullopt;
+}
+
 static bool applyOverviewOption(const std::string& token, SWindowOverviewOptions& options) {
+    constexpr std::string_view DEFAULT_ACTION_PREFIX = "default-action=";
+    if (token.starts_with(DEFAULT_ACTION_PREFIX)) {
+        const auto VALUE  = token.substr(DEFAULT_ACTION_PREFIX.size());
+        const auto ACTION = parseDefaultAction(VALUE);
+        if (!ACTION)
+            return false;
+
+        options.defaultAction = *ACTION;
+        return true;
+    }
+
     if (token == "exclude-current-workspace" || token == "without-current-workspace" ||
         token == "no-current-workspace" || token == "other-workspaces" ||
         token == "not-current-workspace" || token == "include-current-workspace=false" ||
@@ -289,6 +312,14 @@ static int luaWinviewOverview(lua_State* L) {
                 return luaL_error(
                     L, "hyprwinview.overview: field \"start_in_filter_mode\" must be a boolean");
             lua_pop(L, 1);
+
+            lua_getfield(L, 1, "default_action");
+            if (lua_isstring(L, -1))
+                arg += std::string(" default-action=") + lua_tostring(L, -1);
+            else if (!lua_isnil(L, -1))
+                return luaL_error(
+                    L, "hyprwinview.overview: field \"default_action\" must be a string");
+            lua_pop(L, 1);
         } else if (lua_isstring(L, 1))
             arg = lua_tostring(L, 1);
         else
@@ -332,17 +363,19 @@ static std::vector<std::string> luaStringListField(lua_State* L, int tableIdx, c
 }
 
 static void readKeyTable(lua_State* L, int tableIdx, SWinviewKeyConfig& config) {
-    config.left         = luaStringListField(L, tableIdx, "left", config.left);
-    config.right        = luaStringListField(L, tableIdx, "right", config.right);
-    config.up           = luaStringListField(L, tableIdx, "up", config.up);
-    config.down         = luaStringListField(L, tableIdx, "down", config.down);
-    config.go           = luaStringListField(L, tableIdx, "go", config.go);
-    config.bring        = luaStringListField(L, tableIdx, "bring", config.bring);
-    config.bringReplace = luaStringListField(L, tableIdx, "bring_replace", config.bringReplace);
-    config.close        = luaStringListField(L, tableIdx, "close", config.close);
-    config.filterToggle = luaStringListField(L, tableIdx, "filter_toggle", config.filterToggle);
-    config.filterClose  = luaStringListField(L, tableIdx, "filter_close", config.filterClose);
-    config.filterBring  = luaStringListField(L, tableIdx, "filter_bring", config.filterBring);
+    config.left          = luaStringListField(L, tableIdx, "left", config.left);
+    config.right         = luaStringListField(L, tableIdx, "right", config.right);
+    config.up            = luaStringListField(L, tableIdx, "up", config.up);
+    config.down          = luaStringListField(L, tableIdx, "down", config.down);
+    config.defaultAction = luaStringListField(L, tableIdx, "go", config.defaultAction);
+    config.defaultAction = luaStringListField(L, tableIdx, "default", config.defaultAction);
+    config.defaultAction = luaStringListField(L, tableIdx, "default_action", config.defaultAction);
+    config.bring         = luaStringListField(L, tableIdx, "bring", config.bring);
+    config.bringReplace  = luaStringListField(L, tableIdx, "bring_replace", config.bringReplace);
+    config.close         = luaStringListField(L, tableIdx, "close", config.close);
+    config.filterToggle  = luaStringListField(L, tableIdx, "filter_toggle", config.filterToggle);
+    config.filterClose   = luaStringListField(L, tableIdx, "filter_close", config.filterClose);
+    config.filterBring   = luaStringListField(L, tableIdx, "filter_bring", config.filterBring);
     config.filterBringReplace =
         luaStringListField(L, tableIdx, "filter_bring_replace", config.filterBringReplace);
     config.filterLeft  = luaStringListField(L, tableIdx, "filter_left", config.filterLeft);
@@ -350,11 +383,13 @@ static void readKeyTable(lua_State* L, int tableIdx, SWinviewKeyConfig& config) 
     config.filterUp    = luaStringListField(L, tableIdx, "filter_up", config.filterUp);
     config.filterDown  = luaStringListField(L, tableIdx, "filter_down", config.filterDown);
 
-    config.left  = luaStringListField(L, tableIdx, "keys_left", config.left);
-    config.right = luaStringListField(L, tableIdx, "keys_right", config.right);
-    config.up    = luaStringListField(L, tableIdx, "keys_up", config.up);
-    config.down  = luaStringListField(L, tableIdx, "keys_down", config.down);
-    config.go    = luaStringListField(L, tableIdx, "keys_go", config.go);
+    config.left          = luaStringListField(L, tableIdx, "keys_left", config.left);
+    config.right         = luaStringListField(L, tableIdx, "keys_right", config.right);
+    config.up            = luaStringListField(L, tableIdx, "keys_up", config.up);
+    config.down          = luaStringListField(L, tableIdx, "keys_down", config.down);
+    config.defaultAction = luaStringListField(L, tableIdx, "keys_go", config.defaultAction);
+    config.defaultAction =
+        luaStringListField(L, tableIdx, "keys_default_action", config.defaultAction);
     config.bring = luaStringListField(L, tableIdx, "keys_bring", config.bring);
     config.bringReplace =
         luaStringListField(L, tableIdx, "keys_bring_replace", config.bringReplace);
@@ -457,6 +492,8 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
                                                             "down keys", "s,j,down"));
     addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprwinview:keys_go", "go keys",
                                                             "return,enter,space,g,f"));
+    addConfigValue(makeShared<Config::Values::CStringValue>(
+        "plugin:hyprwinview:keys_default_action", "default action keys", ""));
     addConfigValue(makeShared<Config::Values::CStringValue>(
         "plugin:hyprwinview:keys_bring", "bring keys", "b,shift+return,shift+space"));
     addConfigValue(makeShared<Config::Values::CStringValue>("plugin:hyprwinview:keys_bring_replace",

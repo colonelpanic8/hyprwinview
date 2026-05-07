@@ -71,6 +71,7 @@ hl.config({
             hover_border_col = "rgba(66ccffee)",
             border_size = 3,
             window_order = "natural",
+            keys_default_action = "return,enter,space,g,f",
             keys_filter_toggle = "/",
             keys_filter_close = "escape,ctrl+g",
             keys_filter_bring = "ctrl+b",
@@ -120,7 +121,7 @@ hl.plugin.hyprwinview.configure({
         right = { "d", "l", "right" },
         up = { "w", "k", "up" },
         down = { "s", "j", "down" },
-        go = { "return", "enter", "space", "g", "f" },
+        default_action = { "return", "enter", "space", "g", "f" },
         bring = { "b", "shift+return", "shift+space" },
         bring_replace = { "shift + b" },
         close = { "escape", "q" },
@@ -141,7 +142,8 @@ Keyboard key sets are Lua arrays when configuring through
 example `shift+return` or `shift + b`. Modifier matching is exact for Shift,
 Ctrl, Alt, and Super, so `b` and `shift + b` can trigger different actions. The
 scalar `keys_*` plugin options still work as a fallback for hyprlang-style
-configuration.
+configuration. `go` and `keys_go` are still accepted as legacy aliases for the
+default-action key set.
 
 `keys_filter_toggle` enters and leaves filter input mode while the overview is
 open. In filter mode, printable keys update the filter query and only windows
@@ -212,6 +214,7 @@ On Hyprland 0.54 and older hyprlang configs, the same options live under
 hyprwinview:overview toggle
 hyprwinview:overview toggle other-workspaces
 hyprwinview:overview toggle filter
+hyprwinview:overview toggle default-action=bring
 hyprwinview:overview toggle-filter
 hyprwinview:overview toggle exclude-current-workspace
 hyprwinview:overview select
@@ -233,6 +236,11 @@ Use `toggle-filter`, `filter-toggle`, `toggle-search`, or `search-toggle` to
 toggle filter input mode on the active overview, or to open directly into filter
 input mode if the overview is not already open.
 
+Add `default-action=select`, `default-action=bring`, or
+`default-action=bring-replace` when opening the overview to choose what the
+default-action key set does for that overview invocation. The default is
+`select`.
+
 The Lua function accepts the same string arguments, or a table:
 
 ```lua
@@ -240,6 +248,7 @@ hl.plugin.hyprwinview.overview({
     action = "toggle",
     include_current_workspace = false,
     filter_mode = true,
+    default_action = "bring",
 })
 ```
 

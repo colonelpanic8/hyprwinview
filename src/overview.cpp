@@ -105,6 +105,11 @@ static const CConfigValue<Config::STRING>& PKEYSGO() {
     return VALUE;
 }
 
+static const CConfigValue<Config::STRING>& PKEYSDEFAULTACTION() {
+    static const CConfigValue<Config::STRING> VALUE("plugin:hyprwinview:keys_default_action");
+    return VALUE;
+}
+
 static const CConfigValue<Config::STRING>& PKEYSBRING() {
     static const CConfigValue<Config::STRING> VALUE("plugin:hyprwinview:keys_bring");
     return VALUE;
@@ -332,7 +337,7 @@ SWinviewKeyConfig                       defaultWinviewKeyConfig() {
                               .right              = {"d", "l", "right"},
                               .up                 = {"w", "k", "up"},
                               .down               = {"s", "j", "down"},
-                              .go                 = {"return", "enter", "space", "g", "f"},
+                              .defaultAction      = {"return", "enter", "space", "g", "f"},
                               .bring              = {"b", "shift+return", "shift+space"},
                               .bringReplace       = {"shift+b"},
                               .close              = {"escape", "q"},
@@ -476,12 +481,16 @@ static std::string configStringOr(const CConfigValue<Config::STRING>& value,
 }
 
 static SWinviewKeyConfig keyConfigFromConfigValues() {
+    auto defaultAction = keyTokens(configStringOr(PKEYSDEFAULTACTION(), ""));
+    if (defaultAction.empty())
+        defaultAction = keyTokens(configStringOr(PKEYSGO(), "return,enter,space,g,f"));
+
     return {
         .left               = keyTokens(configStringOr(PKEYSLEFT(), "a,h,left")),
         .right              = keyTokens(configStringOr(PKEYSRIGHT(), "d,l,right")),
         .up                 = keyTokens(configStringOr(PKEYSUP(), "w,k,up")),
         .down               = keyTokens(configStringOr(PKEYSDOWN(), "s,j,down")),
-        .go                 = keyTokens(configStringOr(PKEYSGO(), "return,enter,space,g,f")),
+        .defaultAction      = defaultAction,
         .bring              = keyTokens(configStringOr(PKEYSBRING(), "b,shift+return,shift+space")),
         .bringReplace       = keyTokens(configStringOr(PKEYSBRINGREPLACE(), "shift+b")),
         .close              = keyTokens(configStringOr(PKEYSCLOSE(), "escape,q")),
@@ -1529,6 +1538,14 @@ void CWindowOverview::runSelected(bool bring, bool replaceInitial) {
     close(true, bring, replaceInitial);
 }
 
+void CWindowOverview::runDefaultSelected() {
+    switch (options.defaultAction) {
+        case EWinviewDefaultAction::BRING_REPLACE: runSelected(true, true); return;
+        case EWinviewDefaultAction::BRING: runSelected(true); return;
+        case EWinviewDefaultAction::SELECT: runSelected(false); return;
+    }
+}
+
 double CWindowOverview::animationVisibleAmount() const {
     const auto ANIMATION = overviewAnimation();
     if (ANIMATION == EOverviewAnimation::NONE)
@@ -1783,7 +1800,7 @@ bool CWindowOverview::handleKey(const IKeyboard::SKeyEvent& event) {
 
     const bool RECOGNIZED = matchesKeySet(KEYS.left, KEYSYM, MODS) ||
         matchesKeySet(KEYS.right, KEYSYM, MODS) || matchesKeySet(KEYS.up, KEYSYM, MODS) ||
-        matchesKeySet(KEYS.down, KEYSYM, MODS) || matchesKeySet(KEYS.go, KEYSYM, MODS) ||
+        matchesKeySet(KEYS.down, KEYSYM, MODS) || matchesKeySet(KEYS.defaultAction, KEYSYM, MODS) ||
         matchesKeySet(KEYS.bring, KEYSYM, MODS) || matchesKeySet(KEYS.bringReplace, KEYSYM, MODS) ||
         matchesKeySet(KEYS.close, KEYSYM, MODS) || matchesKeySet(KEYS.filterToggle, KEYSYM, MODS);
 
@@ -1805,8 +1822,8 @@ bool CWindowOverview::handleKey(const IKeyboard::SKeyEvent& event) {
         runSelected(true, true);
     else if (matchesKeySet(KEYS.bring, KEYSYM, MODS))
         runSelected(true);
-    else if (matchesKeySet(KEYS.go, KEYSYM, MODS))
-        runSelected(false);
+    else if (matchesKeySet(KEYS.defaultAction, KEYSYM, MODS))
+        runDefaultSelected();
     else if (matchesKeySet(KEYS.close, KEYSYM, MODS))
         close(false);
     else if (matchesKeySet(KEYS.filterToggle, KEYSYM, MODS))
@@ -1859,8 +1876,8 @@ bool CWindowOverview::handleFilterKey(const IKeyboard::SKeyEvent& event, xkb_key
         return true;
     }
 
-    if (RETURN_KEY && matchesKeySet(keys.go, keysym, mods)) {
-        runSelected(false);
+    if (RETURN_KEY && matchesKeySet(keys.defaultAction, keysym, mods)) {
+        runDefaultSelected();
         return true;
     }
 

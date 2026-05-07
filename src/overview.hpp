@@ -17,7 +17,7 @@ struct SWinviewKeyConfig {
     std::vector<std::string> right;
     std::vector<std::string> up;
     std::vector<std::string> down;
-    std::vector<std::string> go;
+    std::vector<std::string> defaultAction;
     std::vector<std::string> bring;
     std::vector<std::string> bringReplace;
     std::vector<std::string> close;
@@ -31,9 +31,16 @@ struct SWinviewKeyConfig {
     std::vector<std::string> filterDown;
 };
 
+enum class EWinviewDefaultAction {
+    SELECT,
+    BRING,
+    BRING_REPLACE,
+};
+
 struct SWindowOverviewOptions {
-    bool includeCurrentWorkspace = true;
-    bool startInFilterMode       = false;
+    bool                  includeCurrentWorkspace = true;
+    bool                  startInFilterMode       = false;
+    EWinviewDefaultAction defaultAction           = EWinviewDefaultAction::SELECT;
 };
 
 class CEventLoopTimer;
@@ -83,6 +90,7 @@ class CWindowOverview {
     void                focusWindow(const PHLWINDOW& window, bool bring, bool replaceInitial);
     void                moveSelection(int dx, int dy);
     void                runSelected(bool bring, bool replaceInitial = false);
+    void                runDefaultSelected();
     bool                handleKey(const IKeyboard::SKeyEvent& event);
     bool                handleFilterKey(const IKeyboard::SKeyEvent& event, xkb_keysym_t keysym,
                                         xkb_state* keyboardState, uint32_t mods, const SWinviewKeyConfig& keys);
