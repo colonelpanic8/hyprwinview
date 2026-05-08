@@ -564,6 +564,7 @@ static bool windowMatchesQuery(const PHLWINDOW& window, const std::string& query
     });
 }
 
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
 static std::string printableTextForKey(xkb_state* state, xkb_keycode_t keycode, uint32_t mods) {
     constexpr uint32_t TEXT_BLOCKING_MODS = HL_MODIFIER_CTRL | HL_MODIFIER_ALT | HL_MODIFIER_META;
     if (!state || (mods & TEXT_BLOCKING_MODS) != 0)
@@ -1911,7 +1912,7 @@ void CWindowOverview::startFilterDeleteRepeat() {
     if (!filterDeleteRepeatTimer) {
         filterDeleteRepeatTimer = makeShared<CEventLoopTimer>(
             std::nullopt,
-            [this](SP<CEventLoopTimer> self, void*) {
+            [this](const SP<CEventLoopTimer>& self, void*) {
                 if (!filterDeleteHeld || closing)
                     return;
 

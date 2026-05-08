@@ -4,6 +4,7 @@
 #define WLR_USE_UNSTABLE
 
 #include <chrono>
+#include <cstdint>
 #include <hyprland/src/desktop/DesktopTypes.hpp>
 #include <hyprland/src/event/EventBus.hpp>
 #include <hyprland/src/render/Framebuffer.hpp>
@@ -31,7 +32,7 @@ struct SWinviewKeyConfig {
     std::vector<std::string> filterDown;
 };
 
-enum class EWinviewDefaultAction {
+enum class EWinviewDefaultAction : std::uint8_t {
     SELECT,
     BRING,
     BRING_REPLACE,
