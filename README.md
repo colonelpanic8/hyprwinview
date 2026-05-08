@@ -238,8 +238,8 @@ input mode if the overview is not already open.
 
 Add `default-action=select`, `default-action=bring`, or
 `default-action=bring-replace` when opening the overview to choose what the
-default-action key set does for that overview invocation. The default is
-`select`.
+default-action key set and tile clicks do for that overview invocation. The
+default is `select`.
 
 The Lua function accepts the same string arguments, or a table:
 

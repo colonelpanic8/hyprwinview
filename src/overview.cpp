@@ -993,7 +993,7 @@ CWindowOverview::CWindowOverview(const PHLMONITOR& monitor, SWindowOverviewOptio
 
         info.cancelled = true;
         selectHoveredWindow();
-        close(true);
+        runDefaultSelected();
     };
 
     auto onKeyboardKey = [this](const IKeyboard::SKeyEvent& event, Event::SCallbackInfo& info) {
