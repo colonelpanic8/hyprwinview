@@ -564,7 +564,6 @@ static bool windowMatchesQuery(const PHLWINDOW& window, const std::string& query
     });
 }
 
-// NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
 static std::string printableTextForKey(xkb_state* state, xkb_keycode_t keycode, uint32_t mods) {
     constexpr uint32_t TEXT_BLOCKING_MODS = HL_MODIFIER_CTRL | HL_MODIFIER_ALT | HL_MODIFIER_META;
     if (!state || (mods & TEXT_BLOCKING_MODS) != 0)
@@ -1277,25 +1276,6 @@ void CWindowOverview::render() {
     g_pHyprRenderer->m_renderPass.add(makeUnique<CWinviewPassElement>());
 }
 
-void CWindowOverview::onDamageReported() {
-    if (closing)
-        return;
-
-    damageDirty = true;
-    damage();
-
-    if (pMonitor)
-        g_pCompositor->scheduleFrameForMonitor(pMonitor.lock());
-}
-
-void CWindowOverview::onPreRender() {
-    if (!damageDirty || closing)
-        return;
-
-    damageDirty = false;
-    renderSnapshots();
-}
-
 void CWindowOverview::draw() {
     if (!pMonitor)
         return;
@@ -1473,11 +1453,8 @@ void CWindowOverview::draw() {
 }
 
 void CWindowOverview::damage() {
-    if (pMonitor) {
-        blockDamageReports = true;
+    if (pMonitor)
         g_pHyprRenderer->damageMonitor(pMonitor.lock());
-        blockDamageReports = false;
-    }
 }
 
 void CWindowOverview::selectHoveredWindow() {
@@ -1777,10 +1754,6 @@ bool CWindowOverview::backgroundBlurEnabled() const {
     return *PBACKGROUNDBLUR() != 0;
 }
 
-bool CWindowOverview::damageReportingBlocked() const {
-    return blockDamageReports;
-}
-
 bool CWindowOverview::occludesScene() const {
     return !isAnimating() && activeBackgroundColor().a >= 1.0;
 }
@@ -1938,7 +1911,7 @@ void CWindowOverview::startFilterDeleteRepeat() {
     if (!filterDeleteRepeatTimer) {
         filterDeleteRepeatTimer = makeShared<CEventLoopTimer>(
             std::nullopt,
-            [this](const SP<CEventLoopTimer>& self, void*) {
+            [this](SP<CEventLoopTimer> self, void*) {
                 if (!filterDeleteHeld || closing)
                     return;
 
