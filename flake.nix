@@ -32,6 +32,8 @@
       "src/main.cpp"
       "src/overview.cpp"
       "src/overview.hpp"
+      "src/overview/input.cpp"
+      "src/overview/ordering.cpp"
       "src/winview_pass_element.cpp"
       "src/winview_pass_element.hpp"
     ];
