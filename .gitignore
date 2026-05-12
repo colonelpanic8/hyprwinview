@@ -41,3 +41,7 @@ result-man
 build/
 .cache/
 .worktrees/
+
+# Generated demo captures
+media/**/*.mp4
+media/**/*.webm

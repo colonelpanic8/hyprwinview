@@ -15,14 +15,18 @@ format-check:
 # Apply clang-format to the tracked C++ sources.
 format:
     nix develop --command clang-format -i \
-        src/AppIcon.cpp \
-        src/AppIcon.hpp \
-        src/WinviewPassElement.cpp \
-        src/WinviewPassElement.hpp \
+        src/app_icon.cpp \
+        src/app_icon.hpp \
+        src/dispatcher.cpp \
+        src/dispatcher.hpp \
         src/globals.hpp \
+        src/lua_api.cpp \
+        src/lua_api.hpp \
         src/main.cpp \
         src/overview.cpp \
-        src/overview.hpp
+        src/overview.hpp \
+        src/winview_pass_element.cpp \
+        src/winview_pass_element.hpp
 
 # Run clang-tidy through the flake check.
 lint:

@@ -22,14 +22,18 @@
         overlays = [hyprland.overlays.hyprland-packages];
       });
     sourceFiles = [
-      "src/AppIcon.cpp"
-      "src/AppIcon.hpp"
-      "src/WinviewPassElement.cpp"
-      "src/WinviewPassElement.hpp"
+      "src/app_icon.cpp"
+      "src/app_icon.hpp"
+      "src/dispatcher.cpp"
+      "src/dispatcher.hpp"
       "src/globals.hpp"
+      "src/lua_api.cpp"
+      "src/lua_api.hpp"
       "src/main.cpp"
       "src/overview.cpp"
       "src/overview.hpp"
+      "src/winview_pass_element.cpp"
+      "src/winview_pass_element.hpp"
     ];
     sourceFileArgs = lib.concatMapStringsSep " " lib.escapeShellArg sourceFiles;
   in {

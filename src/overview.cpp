@@ -31,9 +31,9 @@
 
 #include <xkbcommon/xkbcommon.h>
 
-#include "AppIcon.hpp"
-#include "WinviewPassElement.hpp"
+#include "app_icon.hpp"
 #include "globals.hpp"
+#include "winview_pass_element.hpp"
 
 static const CConfigValue<Config::INTEGER>& PGAP() {
     static const CConfigValue<Config::INTEGER> VALUE("plugin:hyprwinview:gap_size");

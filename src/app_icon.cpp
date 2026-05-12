@@ -1,4 +1,4 @@
-#include "AppIcon.hpp"
+#include "app_icon.hpp"
 
 #define private   public
 #define protected public

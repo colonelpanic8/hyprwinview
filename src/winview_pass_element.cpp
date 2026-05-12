@@ -1,4 +1,4 @@
-#include "WinviewPassElement.hpp"
+#include "winview_pass_element.hpp"
 #include "overview.hpp"
 #include <hyprland/src/helpers/Monitor.hpp>
 
