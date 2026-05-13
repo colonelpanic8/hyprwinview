@@ -38,6 +38,11 @@
       "src/winview_pass_element.hpp"
     ];
     sourceFileArgs = lib.concatMapStringsSep " " lib.escapeShellArg sourceFiles;
+    hyprpmManifest = builtins.fromTOML (builtins.readFile ./hyprpm.toml);
+    hyprpmBuildCommands = lib.concatMapStringsSep "\n" (command: ''
+      cd "$repoRoot"
+      ${command}
+    '') hyprpmManifest.hyprwinview.build;
   in {
     packages = eachSystem (system: let
       pkgs = pkgsFor.${system};
@@ -83,6 +88,34 @@
         clang-format --dry-run --Werror ${sourceFileArgs}
         touch "$out"
       '';
+
+      hyprpm-build = pkgs.gcc14Stdenv.mkDerivation {
+        pname = "hyprwinview-hyprpm-build-check";
+        version = "0.1.0";
+        inherit src;
+
+        inherit (hyprlandPkg) nativeBuildInputs;
+        buildInputs = [hyprlandPkg pkgs.librsvg] ++ hyprlandPkg.buildInputs;
+
+        dontConfigure = true;
+
+        buildPhase = ''
+          runHook preBuild
+          repoRoot="$PWD"
+          test ${lib.escapeShellArg hyprpmManifest.repository.name} = hyprwinview
+          test ${lib.escapeShellArg hyprpmManifest.hyprwinview.output} = build/libhyprwinview.so
+          ${hyprpmBuildCommands}
+          test -f ${lib.escapeShellArg hyprpmManifest.hyprwinview.output}
+          runHook postBuild
+        '';
+
+        installPhase = ''
+          runHook preInstall
+          mkdir -p "$out"
+          cp ${lib.escapeShellArg hyprpmManifest.hyprwinview.output} "$out/"
+          runHook postInstall
+        '';
+      };
 
       clang-tidy = pkgs.gcc14Stdenv.mkDerivation {
         pname = "hyprwinview-clang-tidy";

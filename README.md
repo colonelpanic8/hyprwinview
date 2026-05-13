@@ -38,6 +38,19 @@ For development:
 direnv allow
 ```
 
+## Install With hyprpm
+
+```sh
+hyprpm add https://github.com/colonelpanic8/hyprwinview
+hyprpm enable hyprwinview
+hyprpm reload
+```
+
+On Nix systems, hyprpm will use this repository's flake development shell by
+default. Use `hyprpm --no-nix add ...` only when the system environment already
+provides Hyprland headers and the build dependencies listed in
+`CMakeLists.txt`.
+
 ## Hyprland Lua Config
 
 Load the plugin:

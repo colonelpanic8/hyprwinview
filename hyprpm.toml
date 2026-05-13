@@ -1,0 +1,12 @@
+[repository]
+name = "hyprwinview"
+authors = ["Ivan Malison"]
+
+[hyprwinview]
+description = "A window overview plugin for Hyprland"
+authors = ["Ivan Malison"]
+output = "build/libhyprwinview.so"
+build = [
+    "cmake -S . -B build -DCMAKE_BUILD_TYPE=Release",
+    "cmake --build build --target hyprwinview",
+]
