@@ -617,8 +617,19 @@ static bool minimizedWorkspace(const PHLWORKSPACE& workspace) {
         (workspace->m_isSpecialWorkspace && NAME.find("minimized") != std::string::npos);
 }
 
-static bool minimizedWindow(const PHLWINDOW& window) {
-    return window && minimizedWorkspace(window->m_workspace);
+static bool scratchpadWorkspace(const PHLWORKSPACE& workspace) {
+    if (!workspace)
+        return false;
+
+    const auto& NAME = workspace->m_name;
+    return NAME == "special:NSP" || NAME == "NSP" || NAME.starts_with("scratch-hidden-");
+}
+
+static bool recoverableWindow(const PHLWINDOW& window) {
+    if (!window)
+        return false;
+
+    return minimizedWorkspace(window->m_workspace) || scratchpadWorkspace(window->m_workspace);
 }
 
 CWindowOverview::CWindowOverview(const PHLMONITOR& monitor, SWindowOverviewOptions options_) :
@@ -1514,7 +1525,7 @@ void CWindowOverview::close(bool focusSelection, bool bringSelection,
         selectedWindow = previews[selectedIndex].window;
 
     if (selectedWindow)
-        focusWindow(selectedWindow, bringSelection || minimizedWindow(selectedWindow),
+        focusWindow(selectedWindow, bringSelection || recoverableWindow(selectedWindow),
                     replaceInitialSelection);
 
     damage();
