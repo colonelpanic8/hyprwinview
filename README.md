@@ -265,8 +265,10 @@ hl.plugin.hyprwinview.overview({
 ```
 
 `select` focuses the selected window. If the selected window is minimized on a
-`minimized` or `special:minimized` workspace, `select` restores it to the current
-workspace like `bring` before focusing it. `bring-replace` swaps the selected
+`minimized` or `special:minimized` workspace, or hidden on `special:NSP` or a
+`scratch-hidden-*` scratchpad workspace, `select` always restores it to the current
+workspace like `bring` before focusing it. It never navigates to those storage
+workspaces. `bring-replace` swaps the selected
 window with the window that was focused when the overview opened, then focuses
 the selected window. If that original focused window no longer exists, it falls
 back to normal bring behavior.
