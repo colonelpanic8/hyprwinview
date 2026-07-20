@@ -606,11 +606,8 @@ static bool previewableWindow(const PHLWINDOW& window) {
         return false;
 
     const auto SIZE = window->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
-    if (SIZE.x <= 1 || SIZE.y <= 1 || window->m_realSize->value().x <= 1 ||
-        window->m_realSize->value().y <= 1)
-        return false;
-
-    return true;
+    return SIZE.x > 1 && SIZE.y > 1 && window->m_realSize->value().x > 1 &&
+        window->m_realSize->value().y > 1;
 }
 
 static bool minimizedWorkspace(const PHLWORKSPACE& workspace) {
