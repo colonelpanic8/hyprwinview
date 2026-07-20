@@ -5,6 +5,7 @@ Checks: >
   bugprone-*,
   performance-*,
   portability-*,
+  -portability-template-virtual-member-function,
   modernize-use-nullptr,
   modernize-use-override,
   modernize-use-using,
