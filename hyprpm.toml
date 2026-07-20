@@ -1,6 +1,10 @@
 [repository]
 name = "hyprwinview"
 authors = ["Ivan Malison"]
+commit_pins = [
+    # Hyprland v0.56.0                          hyprwinview v0.1.0
+    ["36b2e0cfe0c6094dbc47bd42a437431315bb3087", "30796826ad253b886682d70b01564509cb721d66"],
+]
 
 [hyprwinview]
 description = "A window overview plugin for Hyprland"
