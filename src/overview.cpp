@@ -18,14 +18,19 @@
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/config/ConfigManager.hpp>
 #include <hyprland/src/desktop/state/FocusState.hpp>
+#include <hyprland/src/desktop/state/GlobalWindowController.hpp>
+#include <hyprland/src/desktop/state/WindowState.hpp>
 #include <hyprland/src/desktop/view/Window.hpp>
 #include <hyprland/src/helpers/time/Time.hpp>
 #include <hyprland/src/layout/LayoutManager.hpp>
 #include <hyprland/src/managers/eventLoop/EventLoopManager.hpp>
+#include <hyprland/src/managers/fullscreen/FullscreenController.hpp>
 #include <hyprland/src/managers/input/InputManager.hpp>
 #include <hyprland/src/managers/SeatManager.hpp>
+#include <hyprland/src/pointer/PointerController.hpp>
 #include <hyprland/src/render/OpenGL.hpp>
 #include <hyprland/src/render/Renderer.hpp>
+#include <hyprland/src/state/WorkspaceState.hpp>
 #undef private
 #undef protected
 
@@ -597,11 +602,11 @@ static CBox appIconBoxForTile(const CBox& tileLogical, double scale) {
 }
 
 static bool previewableWindow(const PHLWINDOW& window) {
-    if (!window || !window->m_isMapped || window->isHidden() || window->m_fadingOut ||
-        !window->m_workspace)
+    if (!window || !window->m_isMapped || window->isHidden() || !window->m_workspace)
         return false;
 
-    if (window->m_size.x <= 1 || window->m_size.y <= 1 || window->m_realSize->value().x <= 1 ||
+    const auto SIZE = window->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
+    if (SIZE.x <= 1 || SIZE.y <= 1 || window->m_realSize->value().x <= 1 ||
         window->m_realSize->value().y <= 1)
         return false;
 
@@ -725,9 +730,10 @@ CWindowOverview::~CWindowOverview() {
 void CWindowOverview::collectWindows() {
     allPreviews.clear();
 
-    const auto CURRENT_WORKSPACE = pMonitor ? pMonitor->m_activeWorkspace : nullptr;
+    const auto  CURRENT_WORKSPACE = pMonitor ? pMonitor->m_activeWorkspace : nullptr;
 
-    for (auto it = g_pCompositor->m_windows.rbegin(); it != g_pCompositor->m_windows.rend(); ++it) {
+    const auto& WINDOWS = Desktop::windowState()->windows();
+    for (auto it = WINDOWS.rbegin(); it != WINDOWS.rend(); ++it) {
         const auto& window = *it;
         if (!previewableWindow(window))
             continue;
@@ -747,7 +753,7 @@ void CWindowOverview::collectWindows() {
 void CWindowOverview::updateWorkspaceGrid() {
     int workspaceCount = 1;
 
-    for (const auto& workspace : g_pCompositor->getWorkspacesCopy()) {
+    for (const auto& workspace : State::workspaceState()->workspaces()) {
         if (!workspace || workspace->m_isSpecialWorkspace || workspace->m_id <= 0)
             continue;
 
@@ -1477,7 +1483,8 @@ void CWindowOverview::focusWindow(const PHLWINDOW& window, bool bring, bool repl
     const bool CAN_REPLACE_INITIAL = replaceInitial && g_layoutManager && initialFocusedWindow &&
         initialFocusedWindow != window && initialFocusedWindow->m_isMapped &&
         initialFocusedWindow->m_workspace && SELECTED_ORIGINAL_WORKSPACE && SELECTED_TARGET &&
-        INITIAL_TARGET && !window->isFullscreen() && !initialFocusedWindow->isFullscreen();
+        INITIAL_TARGET && !Fullscreen::controller()->isFullscreen(window) &&
+        !Fullscreen::controller()->isFullscreen(initialFocusedWindow);
 
     if (CAN_REPLACE_INITIAL) {
         g_layoutManager->switchTargets(SELECTED_TARGET, INITIAL_TARGET, true);
@@ -1485,20 +1492,19 @@ void CWindowOverview::focusWindow(const PHLWINDOW& window, bool bring, bool repl
                initialFocusedWindow->m_isMapped && initialFocusedWindow->m_workspace &&
                SELECTED_ORIGINAL_WORKSPACE &&
                initialFocusedWindow->m_workspace != SELECTED_ORIGINAL_WORKSPACE) {
-        g_pCompositor->moveWindowToWorkspaceSafe(initialFocusedWindow, SELECTED_ORIGINAL_WORKSPACE);
-        initialFocusedWindow->m_workspace = SELECTED_ORIGINAL_WORKSPACE;
+        Desktop::globalWindowController()->moveWindowToWorkspace(initialFocusedWindow,
+                                                                 SELECTED_ORIGINAL_WORKSPACE);
     }
 
     if ((bring || replaceInitial) && TARGET_WORKSPACE && window->m_workspace != TARGET_WORKSPACE) {
-        g_pCompositor->moveWindowToWorkspaceSafe(window, TARGET_WORKSPACE);
-        window->m_workspace = TARGET_WORKSPACE;
+        Desktop::globalWindowController()->moveWindowToWorkspace(window, TARGET_WORKSPACE);
     }
 
     if (MONITOR && MONITOR->m_activeWorkspace != window->m_workspace)
         MONITOR->changeWorkspace(window->m_workspace);
 
     FOCUSSTATE->fullWindowFocus(window, Desktop::FOCUS_REASON_KEYBIND);
-    g_pCompositor->warpCursorTo(window->middle());
+    Pointer::pointerController()->warpTo(window->middle());
 }
 
 void CWindowOverview::finishClose() {

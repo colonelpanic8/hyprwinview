@@ -1,6 +1,6 @@
 #include "winview_pass_element.hpp"
 #include "overview.hpp"
-#include <hyprland/src/helpers/Monitor.hpp>
+#include <hyprland/src/output/Monitor.hpp>
 
 std::vector<UP<IPassElement>> CWinviewPassElement::draw() {
     if (g_pWindowOverview)
