@@ -130,6 +130,7 @@ class CWindowOverview {
     bool                                  filterMode         = false;
     bool                                  filterAnimating    = false;
     bool                                  filterDeleteHeld   = false;
+    bool                                  cursorOverrideSet  = false;
     std::chrono::steady_clock::time_point animationStartedAt;
     std::chrono::steady_clock::time_point filterAnimationStartedAt;
 
