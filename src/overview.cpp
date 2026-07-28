@@ -28,6 +28,7 @@
 #include <hyprland/src/managers/input/InputManager.hpp>
 #include <hyprland/src/managers/SeatManager.hpp>
 #include <hyprland/src/pointer/PointerController.hpp>
+#include <hyprland/src/pointer/PointerManager.hpp>
 #include <hyprland/src/pointer/cursor/CursorShapeOverrideController.hpp>
 #include <hyprland/src/render/OpenGL.hpp>
 #include <hyprland/src/render/Renderer.hpp>
@@ -937,6 +938,13 @@ void CWindowOverview::render() {
     }
 
     g_pHyprRenderer->m_renderPass.add(makeUnique<CWinviewPassElement>());
+
+    // Software cursors are queued before RENDER_LAST_MOMENT, so the overview element
+    // above would cover them; queue another cursor draw on top. No-op with hardware
+    // cursors (renderSoftwareCursorsFor returns early when none are locked).
+    if (g_pHyprRenderer->shouldRenderCursor())
+        Pointer::mgr()->renderSoftwareCursorsFor(pMonitor.lock(), Time::steadyNow(),
+                                                 g_pHyprRenderer->m_renderData.damage);
 }
 
 void CWindowOverview::draw() {
