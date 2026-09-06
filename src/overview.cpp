@@ -28,6 +28,8 @@
 #include <hyprland/src/managers/input/InputManager.hpp>
 #include <hyprland/src/managers/SeatManager.hpp>
 #include <hyprland/src/pointer/PointerController.hpp>
+#include <hyprland/src/pointer/PointerManager.hpp>
+#include <hyprland/src/pointer/cursor/CursorShapeOverrideController.hpp>
 #include <hyprland/src/render/OpenGL.hpp>
 #include <hyprland/src/render/Renderer.hpp>
 #include <hyprland/src/state/WorkspaceState.hpp>
@@ -703,10 +705,18 @@ CWindowOverview::CWindowOverview(const PHLMONITOR& monitor, SWindowOverviewOptio
             onKeyboardKey(event, info);
         });
 
+    Pointer::Cursor::overrideController->setOverride("left_ptr",
+                                                     Pointer::Cursor::CURSOR_OVERRIDE_UNKNOWN);
+    cursorOverrideSet = true;
+
     damage();
 }
 
 CWindowOverview::~CWindowOverview() {
+    if (cursorOverrideSet)
+        Pointer::Cursor::overrideController->unsetOverride(
+            Pointer::Cursor::CURSOR_OVERRIDE_UNKNOWN);
+
     stopFilterDeleteRepeat();
     if (filterDeleteRepeatTimer && g_pEventLoopManager)
         g_pEventLoopManager->removeTimer(filterDeleteRepeatTimer);
@@ -939,6 +949,13 @@ void CWindowOverview::render() {
     }
 
     g_pHyprRenderer->m_renderPass.add(makeUnique<CWinviewPassElement>(true));
+
+    // Software cursors are queued before RENDER_LAST_MOMENT, so the overview passes
+    // above would cover them; queue another cursor draw on top. No-op with hardware
+    // cursors (renderSoftwareCursorsFor returns early when none are locked).
+    if (g_pHyprRenderer->shouldRenderCursor())
+        Pointer::mgr()->renderSoftwareCursorsFor(pMonitor.lock(), Time::steadyNow(),
+                                                 g_pHyprRenderer->m_renderData.damage);
 
     // Windows on inactive workspaces do not necessarily damage this monitor when their
     // contents update. Keep the overview on the monitor's refresh loop so every tile is
@@ -1495,6 +1512,12 @@ void CWindowOverview::close(bool focusSelection, bool bringSelection,
         return;
 
     stopFilterDeleteRepeat();
+
+    if (cursorOverrideSet) {
+        Pointer::Cursor::overrideController->unsetOverride(
+            Pointer::Cursor::CURSOR_OVERRIDE_UNKNOWN);
+        cursorOverrideSet = false;
+    }
 
     closing            = true;
     animationStartedAt = Time::steadyNow();
