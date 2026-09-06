@@ -1,5 +1,5 @@
 {
-  description = "hyprwinview, a window overview plugin for Hyprland";
+  description = "hyprwinview, window and workspace overviews for Hyprland";
 
   inputs = {
     hyprland.url = "git+https://github.com/hyprwm/Hyprland?submodules=1";
@@ -24,6 +24,10 @@
     sourceFiles = [
       "src/app_icon.cpp"
       "src/app_icon.hpp"
+      "src/app_icon_loader.cpp"
+      "src/app_icon_loader.hpp"
+      "src/app_icon_lookup.cpp"
+      "src/app_icon_lookup.hpp"
       "src/dispatcher.cpp"
       "src/dispatcher.hpp"
       "src/globals.hpp"
@@ -36,8 +40,33 @@
       "src/overview/ordering.cpp"
       "src/winview_pass_element.cpp"
       "src/winview_pass_element.hpp"
+      "src/workspace/config.hpp"
+      "src/workspace/globals.hpp"
+      "src/workspace/input.cpp"
+      "src/workspace/layout/grid.cpp"
+      "src/workspace/layout/grid.hpp"
+      "src/workspace/layout/layout_base.cpp"
+      "src/workspace/layout/layout_base.hpp"
+      "src/workspace/layout/linear.cpp"
+      "src/workspace/layout/linear.hpp"
+      "src/workspace/manager.cpp"
+      "src/workspace/manager.hpp"
+      "src/workspace/module.cpp"
+      "src/workspace/module.hpp"
+      "src/workspace/overview.cpp"
+      "src/workspace/overview.hpp"
+      "src/workspace/pass/pass_element.cpp"
+      "src/workspace/pass/pass_element.hpp"
+      "src/workspace/render.cpp"
+      "src/workspace/render.hpp"
+      "src/workspace/types.hpp"
     ];
     sourceFileArgs = lib.concatMapStringsSep " " lib.escapeShellArg sourceFiles;
+    # The imported Hyprtasking module retains its upstream conventions for this
+    # first combined release. Format it with the rest of the tree, while keeping
+    # the existing warnings-as-errors clang-tidy gate on native hyprwinview code.
+    tidySourceFiles = lib.filter (file: !(lib.hasPrefix "src/workspace/" file)) sourceFiles;
+    tidySourceFileArgs = lib.concatMapStringsSep " " lib.escapeShellArg tidySourceFiles;
     hyprpmManifest = builtins.fromTOML (builtins.readFile ./hyprpm.toml);
     hyprpmBuildCommands = lib.concatMapStringsSep "\n" (command: ''
       cd "$repoRoot"
@@ -50,7 +79,7 @@
     in {
       default = pkgs.hyprlandPlugins.mkHyprlandPlugin {
         pluginName = "hyprwinview";
-        version = "0.1.0";
+        version = "0.2.0";
         src = builtins.path {
           path = ./.;
           name = "hyprwinview-source";
@@ -60,7 +89,7 @@
         buildInputs = [pkgs.librsvg];
 
         meta = {
-          description = "A window overview plugin for Hyprland";
+          description = "Window and workspace overviews for Hyprland";
           homepage = "https://github.com/colonelpanic8/hyprwinview";
           license = lib.licenses.bsd3;
           platforms = lib.platforms.linux;
@@ -80,18 +109,68 @@
     in {
       hyprwinview = self.packages.${system}.default;
 
+      app-icon-lookup = pkgs.runCommand "hyprwinview-app-icon-lookup-tests" {
+        inherit src;
+        nativeBuildInputs = [pkgs.gcc pkgs.pkg-config];
+        buildInputs = [pkgs.cairo pkgs.librsvg];
+      } ''
+        c++ -std=c++23 -O2 -Wall -Wextra -Werror -I"$src/src" \
+          "$src/tests/app_icon_lookup.cpp" "$src/src/app_icon_lookup.cpp" -o test-icons
+        ./test-icons "$TMPDIR/icons"
+        c++ -std=c++23 -O2 -Wall -Wextra -Werror -pthread -I"$src/src" \
+          $(pkg-config --cflags cairo librsvg-2.0) \
+          "$src/tests/app_icon_loader.cpp" "$src/src/app_icon_loader.cpp" \
+          "$src/src/app_icon_lookup.cpp" $(pkg-config --libs cairo librsvg-2.0) -o test-loader
+        ./test-loader "$TMPDIR/loader"
+        touch "$out"
+      '';
+
       clang-format = pkgs.runCommand "hyprwinview-clang-format-check" {
         inherit src;
         nativeBuildInputs = [pkgs.clang-tools];
       } ''
         cd "$src"
-        clang-format --dry-run --Werror ${sourceFileArgs}
+        clang-format --dry-run --Werror ${sourceFileArgs} tests/app_icon_lookup.cpp tests/app_icon_loader.cpp
+        touch "$out"
+      '';
+
+      hyprland-hook-symbols = pkgs.runCommand "hyprwinview-hyprland-hook-symbols" {
+        nativeBuildInputs = [pkgs.binutils pkgs.gawk];
+      } ''
+        awk '
+          /"_ZN/ {
+            collecting = 1
+            symbol = ""
+          }
+          collecting {
+            line = $0
+            while (match(line, /"[^"]*"/)) {
+              token = substr(line, RSTART + 1, RLENGTH - 2)
+              symbol = symbol token
+              line = substr(line, RSTART + RLENGTH)
+            }
+            if ($0 ~ /\);[[:space:]]*$/) {
+              print symbol
+              collecting = 0
+            }
+          }
+        ' ${src}/src/workspace/module.cpp > required-symbols
+        test -s required-symbols
+        nm -D -j ${hyprlandPkg}/bin/.Hyprland-wrapped > available-symbols
+
+        while IFS= read -r symbol; do
+          if ! grep -Fx -- "$symbol" available-symbols >/dev/null; then
+            echo "Hyprland does not export required hook symbol: $symbol" >&2
+            exit 1
+          fi
+        done < required-symbols
+
         touch "$out"
       '';
 
       hyprpm-build = pkgs.gcc14Stdenv.mkDerivation {
         pname = "hyprwinview-hyprpm-build-check";
-        version = "0.1.0";
+        version = "0.2.0";
         inherit src;
 
         inherit (hyprlandPkg) nativeBuildInputs;
@@ -119,7 +198,7 @@
 
       clang-tidy = pkgs.gcc14Stdenv.mkDerivation {
         pname = "hyprwinview-clang-tidy";
-        version = "0.1.0";
+        version = "0.2.0";
         inherit src;
 
         inputsFrom = [
@@ -140,7 +219,7 @@
         '';
         buildPhase = ''
           runHook preBuild
-          clang-tidy -p build ${sourceFileArgs}
+          clang-tidy -p build ${tidySourceFileArgs}
           runHook postBuild
         '';
         installPhase = ''

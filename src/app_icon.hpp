@@ -5,6 +5,8 @@
 #include <hyprland/src/render/Texture.hpp>
 
 SP<Render::ITexture> appIconTextureForWindow(const PHLWINDOW& window, int sizePx);
+void                 initializeAppIconCache();
+void                 uploadReadyAppIcons();
 void                 clearAppIconCache();
 
 #endif

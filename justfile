@@ -17,6 +17,10 @@ format:
     nix develop --command clang-format -i \
         src/app_icon.cpp \
         src/app_icon.hpp \
+        src/app_icon_loader.cpp \
+        src/app_icon_loader.hpp \
+        src/app_icon_lookup.cpp \
+        src/app_icon_lookup.hpp \
         src/dispatcher.cpp \
         src/dispatcher.hpp \
         src/globals.hpp \
@@ -28,7 +32,29 @@ format:
         src/overview/input.cpp \
         src/overview/ordering.cpp \
         src/winview_pass_element.cpp \
-        src/winview_pass_element.hpp
+        src/winview_pass_element.hpp \
+        src/workspace/config.hpp \
+        src/workspace/globals.hpp \
+        src/workspace/input.cpp \
+        src/workspace/layout/grid.cpp \
+        src/workspace/layout/grid.hpp \
+        src/workspace/layout/layout_base.cpp \
+        src/workspace/layout/layout_base.hpp \
+        src/workspace/layout/linear.cpp \
+        src/workspace/layout/linear.hpp \
+        src/workspace/manager.cpp \
+        src/workspace/manager.hpp \
+        src/workspace/module.cpp \
+        src/workspace/module.hpp \
+        src/workspace/overview.cpp \
+        src/workspace/overview.hpp \
+        src/workspace/pass/pass_element.cpp \
+        src/workspace/pass/pass_element.hpp \
+        src/workspace/render.cpp \
+        src/workspace/render.hpp \
+        src/workspace/types.hpp \
+        tests/app_icon_lookup.cpp \
+        tests/app_icon_loader.cpp
 
 # Run clang-tidy through the flake check.
 lint:
@@ -37,3 +63,7 @@ lint:
 # Build the plugin package.
 build:
     nix build -L .#hyprwinview
+
+# Exercise icon lookup and cache invalidation without a compositor.
+test-icons:
+    nix build -L ".#checks.$(nix eval --raw --impure --expr builtins.currentSystem).app-icon-lookup"

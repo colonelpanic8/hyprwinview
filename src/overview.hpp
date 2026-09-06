@@ -7,7 +7,6 @@
 #include <cstdint>
 #include <hyprland/src/desktop/DesktopTypes.hpp>
 #include <hyprland/src/event/EventBus.hpp>
-#include <hyprland/src/render/Framebuffer.hpp>
 #include <string>
 #include <utility>
 #include <vector>
@@ -55,7 +54,8 @@ class CWindowOverview {
     ~CWindowOverview();
 
     void          render();
-    void          draw();
+    void          drawBackground();
+    void          drawForeground();
     void          damage();
     void          close(bool focusSelection = false, bool bringSelection = false,
                         bool replaceInitialSelection = false);
@@ -69,20 +69,26 @@ class CWindowOverview {
 
   private:
     struct SWindowPreview {
-        PHLWINDOW                window;
-        SP<Render::IFramebuffer> fb;
-        CBox                     tileLogical;
-        CBox                     filterStartLogical;
-        std::string              orderGroupKey;
-        size_t                   orderOriginalIndex = 0;
-        size_t                   orderGroupIndex    = 0;
+        PHLWINDOW   window;
+        CBox        tileLogical;
+        CBox        filterStartLogical;
+        std::string orderGroupKey;
+        size_t      orderOriginalIndex = 0;
+        size_t      orderGroupIndex    = 0;
+    };
+
+    struct SFramePreview {
+        PHLWINDOW window;
+        CBox      tilePx;
+        double    visible     = 1.0;
+        double    windowAlpha = 1.0;
+        bool      selected    = false;
     };
 
     void                collectWindows();
     void                applyWindowOrdering(std::vector<SWindowPreview>& windowPreviews);
     void                rebuildVisiblePreviews(bool animate);
     void                updateWorkspaceGrid();
-    void                renderSnapshots();
     void                updateLayout();
     int                 hoveredIndex() const;
     void                focusWindow(const PHLWINDOW& window, bool bring, bool replaceInitial);
@@ -116,6 +122,7 @@ class CWindowOverview {
     std::vector<SWindowPreview>           allPreviews;
     std::vector<SWindowPreview>           previews;
     std::vector<SWindowPreview>           exitingPreviews;
+    std::vector<SFramePreview>            framePreviews;
     SWindowOverviewOptions                options;
     PHLWINDOW                             initialFocusedWindow;
     PHLWORKSPACE                          initialFocusedWorkspace;
@@ -142,5 +149,8 @@ class CWindowOverview {
 };
 
 inline std::unique_ptr<CWindowOverview> g_pWindowOverview;
+
+bool                                    windowOverviewActive();
+void                                    closeWindowOverviewImmediately();
 
 #endif

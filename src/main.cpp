@@ -19,6 +19,7 @@
 #include "globals.hpp"
 #include "lua_api.hpp"
 #include "overview.hpp"
+#include "workspace/module.hpp"
 
 APICALL EXPORT std::string PLUGIN_API_VERSION() {
     return HYPRLAND_API_VERSION;
@@ -179,7 +180,11 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
                                               "overview workspace_zoom panel gap", 18));
 
     static auto renderStage = Event::bus()->m_events.render.stage.listen([](eRenderStage stage) {
-        if (stage != RENDER_LAST_MOMENT || !g_pWindowOverview)
+        if (stage != RENDER_LAST_MOMENT)
+            return;
+
+        uploadReadyAppIcons();
+        if (!g_pWindowOverview)
             return;
 
         const auto MONITOR = g_pHyprRenderer->m_renderData.pMonitor.lock();
@@ -190,15 +195,23 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     HyprlandAPI::addDispatcherV2(PHANDLE, "hyprwinview:overview", ::onWinviewDispatcher);
     HyprlandAPI::addLuaFunction(PHANDLE, "hyprwinview", "overview", ::luaWinviewOverview);
     HyprlandAPI::addLuaFunction(PHANDLE, "hyprwinview", "configure", ::luaWinviewConfigure);
-    HyprlandAPI::reloadConfig();
 
-    HyprlandAPI::addNotification(PHANDLE, "[hyprwinview] Initialized successfully",
+    initializeWorkspaceOverview(handle);
+    HyprlandAPI::reloadConfig();
+    initializeAppIconCache();
+
+    HyprlandAPI::addNotification(PHANDLE,
+                                 "[hyprwinview] Window and workspace overviews initialized",
                                  CHyprColor{0.2, 1.0, 0.2, 1.0}, 5000);
-    return {"hyprwinview", "A window overview plugin for Hyprland", "Ivan Malison", "0.1.0"};
+    return {"hyprwinview", "Window and workspace overviews for Hyprland",
+            "Ivan Malison and Raymond Bian", "0.2.0"};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {
     g_pWindowOverview.reset();
+    shutdownWorkspaceOverview();
     clearAppIconCache();
     g_pHyprRenderer->m_renderPass.removeAllOfType("CWinviewPassElement");
+    g_pHyprRenderer->m_renderPass.removeAllOfType("COverviewRenderContextPassElement");
+    g_pHyprRenderer->m_renderPass.removeAllOfType("HTDisableSimplification");
 }

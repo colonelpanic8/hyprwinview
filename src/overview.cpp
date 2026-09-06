@@ -39,6 +39,7 @@
 #include "app_icon.hpp"
 #include "globals.hpp"
 #include "winview_pass_element.hpp"
+#include "workspace/render.hpp"
 
 static const CConfigValue<Config::INTEGER>& PGAP() {
     static const CConfigValue<Config::INTEGER> VALUE("plugin:hyprwinview:gap_size");
@@ -239,11 +240,7 @@ enum class EOverviewAnimation : uint8_t {
 
 static constexpr uint64_t DEFAULT_BACKGROUND = 0x99101014;
 
-static uint32_t           framebufferFormatWithAlpha(uint32_t drmFormat) {
-    return DRM_FORMAT_ABGR8888;
-}
-
-static std::string trimmedLower(std::string token) {
+static std::string        trimmedLower(std::string token) {
     auto notSpace = [](unsigned char c) { return !std::isspace(c); };
     token.erase(token.begin(), std::ranges::find_if(token, notSpace));
     token.erase(std::ranges::find_if(token.rbegin(), token.rend(), notSpace).base(), token.end());
@@ -645,7 +642,6 @@ CWindowOverview::CWindowOverview(const PHLMONITOR& monitor, SWindowOverviewOptio
          (pMonitor ? pMonitor->m_activeWorkspace : nullptr);
 
     collectWindows();
-    renderSnapshots();
     rebuildVisiblePreviews(false);
 
     lastMousePosLocal = g_pInputManager->getMouseCoordsInternal() - pMonitor->m_position;
@@ -716,12 +712,10 @@ CWindowOverview::~CWindowOverview() {
         g_pEventLoopManager->removeTimer(filterDeleteRepeatTimer);
     filterDeleteRepeatTimer.reset();
 
-    Render::GL::g_pHyprOpenGL->makeEGLCurrent();
-    for (auto& preview : allPreviews)
-        preview.fb.reset();
     allPreviews.clear();
     previews.clear();
     exitingPreviews.clear();
+    framePreviews.clear();
 }
 
 void CWindowOverview::collectWindows() {
@@ -877,41 +871,6 @@ void CWindowOverview::updateLayout() {
     }
 }
 
-void CWindowOverview::renderSnapshots() {
-    if (!pMonitor)
-        return;
-
-    Render::GL::g_pHyprOpenGL->makeEGLCurrent();
-
-    const auto FORMAT = framebufferFormatWithAlpha(pMonitor->m_output->state->state().drmFormat);
-
-    for (auto& preview : allPreviews) {
-        if (!preview.fb)
-            preview.fb = g_pHyprRenderer->createFB("hyprwinview");
-
-        if (preview.fb->m_size != pMonitor->m_pixelSize) {
-            preview.fb->release();
-            preview.fb->alloc(static_cast<int>(pMonitor->m_pixelSize.x),
-                              static_cast<int>(pMonitor->m_pixelSize.y), FORMAT);
-        }
-
-        CRegion fakeDamage{0, 0,
-                           static_cast<double>(static_cast<int>(pMonitor->m_transformedSize.x)),
-                           static_cast<double>(static_cast<int>(pMonitor->m_transformedSize.y))};
-        if (!g_pHyprRenderer->beginFullFakeRender(pMonitor.lock(), fakeDamage, preview.fb))
-            continue;
-
-        g_pHyprRenderer->m_bRenderingSnapshot = true;
-        g_pHyprRenderer->draw(CClearPassElement::SClearData{CHyprColor(0, 0, 0, 0)});
-        g_pHyprRenderer->startRenderPass();
-        g_pHyprRenderer->renderWindow(preview.window, pMonitor.lock(), Time::steadyNow(), false,
-                                      Render::RENDER_PASS_ALL, true, true);
-        g_pHyprRenderer->m_renderData.blockScreenShader = true;
-        g_pHyprRenderer->endRender();
-        g_pHyprRenderer->m_bRenderingSnapshot = false;
-    }
-}
-
 int CWindowOverview::hoveredIndex() const {
     for (size_t i = 0; i < previews.size(); ++i) {
         if (previews[i].tileLogical.containsPoint(lastMousePosLocal))
@@ -927,52 +886,100 @@ void CWindowOverview::render() {
         return;
     }
 
-    g_pHyprRenderer->m_renderPass.add(makeUnique<CWinviewPassElement>());
-}
-
-void CWindowOverview::draw() {
     if (!pMonitor)
         return;
 
     const double SCALE      = pMonitor->m_scale;
-    const auto   HOVERED    = selectedIndex;
-    const int    BORDER     = static_cast<int>(std::max<Config::INTEGER>(0, *PBORDERSIZE()));
     const auto   ANIMATION  = overviewAnimation();
     const auto   VISIBLE    = animationVisibleAmount();
     const auto   BASE_SCALE = std::clamp<double>(*PANIMATIONSCALE(), 0.01, 1.0);
-    CRegion      fullDamage = {0, 0, INT16_MAX, INT16_MAX};
+
+    framePreviews.clear();
+    framePreviews.reserve(exitingPreviews.size() + previews.size());
+
+    const auto FILTER_PROGRESS = filterTransitionVisibleAmount();
+    for (auto& preview : exitingPreviews) {
+        const auto EXIT_VISIBLE = VISIBLE * (1.0 - FILTER_PROGRESS);
+        if (EXIT_VISIBLE <= 0.0 || !preview.window)
+            continue;
+
+        CBox tilePx = scaleBoxFromCenter(preview.tileLogical, 0.96 + 0.04 * EXIT_VISIBLE)
+                          .scale(SCALE)
+                          .round();
+        framePreviews.push_back({preview.window, tilePx, EXIT_VISIBLE, EXIT_VISIBLE, false});
+    }
+
+    for (size_t i = 0; i < previews.size(); ++i) {
+        auto& preview = previews[i];
+        if (!preview.window)
+            continue;
+
+        const auto TILE_VISIBLE = tileAnimationVisibleAmount(i);
+        const auto WINDOW_ALPHA = animatedTileTextureAlpha(i, TILE_VISIBLE);
+        const auto TILE_SCALE =
+            animationScalesTiles(ANIMATION) ? BASE_SCALE + (1.0 - BASE_SCALE) * TILE_VISIBLE : 1.0;
+        CBox tilePx = scaleBoxFromCenter(animatedTileLogicalBox(i, TILE_VISIBLE), TILE_SCALE)
+                          .scale(SCALE)
+                          .round();
+        framePreviews.push_back(
+            {preview.window, tilePx, TILE_VISIBLE, WINDOW_ALPHA, (int)i == selectedIndex});
+    }
+
+    g_pHyprRenderer->m_renderPass.add(makeUnique<CWinviewPassElement>(false));
+
+    const auto MONITOR = pMonitor.lock();
+    if (!MONITOR)
+        return;
+    const auto NOW = Time::steadyNow();
+    for (const auto& preview : framePreviews) {
+        CBox globalLogical = preview.tilePx.copy().scale(1.0 / SCALE);
+        globalLogical      = globalLogical.translate(MONITOR->m_position);
+        render_window_at_box(preview.window, MONITOR, NOW, globalLogical,
+                             static_cast<float>(preview.windowAlpha));
+    }
+
+    g_pHyprRenderer->m_renderPass.add(makeUnique<CWinviewPassElement>(true));
+
+    // Windows on inactive workspaces do not necessarily damage this monitor when their
+    // contents update. Keep the overview on the monitor's refresh loop so every tile is
+    // genuinely live, matching the workspace overview behavior.
+    damage();
+}
+
+void CWindowOverview::drawBackground() {
+    if (!pMonitor)
+        return;
+
+    const auto VISIBLE    = animationVisibleAmount();
+    const int  BORDER     = static_cast<int>(std::max<Config::INTEGER>(0, *PBORDERSIZE()));
+    CRegion    fullDamage = {0, 0, INT16_MAX, INT16_MAX};
 
     Render::GL::g_pHyprOpenGL->renderRect(
         CBox{{0, 0}, pMonitor->m_pixelSize}, multiplyAlpha(activeBackgroundColor(), VISIBLE),
         {.damage = &fullDamage, .blur = backgroundBlurEnabled(), .blurA = (float)VISIBLE});
 
-    // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
-    auto drawPreview = [&](SWindowPreview& preview, CBox tilePx, double tileVisible,
-                           double textureAlpha, bool selected) {
-        if (!preview.fb || !preview.fb->getTexture())
-            return;
+    if (BORDER <= 0)
+        return;
 
-        CBox texBox = {
-            tilePx.x,
-            tilePx.y,
-            pMonitor->m_pixelSize.x *
-                (tilePx.w / std::max(1.0, preview.window->m_realSize->value().x * SCALE)),
-            pMonitor->m_pixelSize.y *
-                (tilePx.h / std::max(1.0, preview.window->m_realSize->value().y * SCALE)),
-        };
+    for (const auto& preview : framePreviews) {
+        const auto COLOR = preview.selected ? CHyprColor(*PHOVERBORDER()) : CHyprColor(*PBORDER());
+        Render::GL::g_pHyprOpenGL->renderRect(preview.tilePx.copy().expand(BORDER),
+                                              multiplyAlpha(COLOR, preview.visible),
+                                              {.damage = &fullDamage, .round = BORDER * 2});
+    }
+}
 
-        if (BORDER > 0) {
-            const auto COLOR = selected ? CHyprColor(*PHOVERBORDER()) : CHyprColor(*PBORDER());
-            Render::GL::g_pHyprOpenGL->renderRect(tilePx.copy().expand(BORDER),
-                                                  multiplyAlpha(COLOR, tileVisible),
-                                                  {.damage = &fullDamage, .round = BORDER * 2});
-        }
+void CWindowOverview::drawForeground() {
+    if (!pMonitor)
+        return;
 
-        g_pHyprRenderer->m_renderData.clipBox = tilePx;
-        Render::GL::g_pHyprOpenGL->renderTexture(
-            preview.fb->getTexture(), texBox,
-            {.damage = &fullDamage, .a = (float)textureAlpha, .round = BORDER * 2});
-        g_pHyprRenderer->m_renderData.clipBox = {};
+    const double SCALE      = pMonitor->m_scale;
+    const auto   VISIBLE    = animationVisibleAmount();
+    CRegion      fullDamage = {0, 0, INT16_MAX, INT16_MAX};
+
+    for (const auto& preview : framePreviews) {
+        const auto& tilePx      = preview.tilePx;
+        const auto  tileVisible = preview.visible;
 
         if (*PSHOWAPPICON() != 0) {
             const int ICON_SIZE_PX = std::max(
@@ -1036,34 +1043,6 @@ void CWindowOverview::draw() {
                 }
             }
         }
-    };
-
-    const auto FILTER_PROGRESS = filterTransitionVisibleAmount();
-    for (auto& preview : exitingPreviews) {
-        const auto EXIT_VISIBLE = VISIBLE * (1.0 - FILTER_PROGRESS);
-        if (EXIT_VISIBLE <= 0.0)
-            continue;
-
-        CBox tilePx = scaleBoxFromCenter(preview.tileLogical, 0.96 + 0.04 * EXIT_VISIBLE)
-                          .scale(SCALE)
-                          .round();
-        drawPreview(preview, tilePx, EXIT_VISIBLE, EXIT_VISIBLE, false);
-    }
-
-    for (size_t i = 0; i < previews.size(); ++i) {
-        auto& preview = previews[i];
-        if (!preview.fb || !preview.fb->getTexture())
-            continue;
-
-        const auto TILE_VISIBLE  = tileAnimationVisibleAmount(i);
-        const auto TEXTURE_ALPHA = animatedTileTextureAlpha(i, TILE_VISIBLE);
-        const auto TILE_SCALE =
-            animationScalesTiles(ANIMATION) ? BASE_SCALE + (1.0 - BASE_SCALE) * TILE_VISIBLE : 1.0;
-        CBox tilePx = scaleBoxFromCenter(animatedTileLogicalBox(i, TILE_VISIBLE), TILE_SCALE)
-                          .scale(SCALE)
-                          .round();
-
-        drawPreview(preview, tilePx, TILE_VISIBLE, TEXTURE_ALPHA, (int)i == HOVERED);
     }
 
     if (filterMode || !filterQuery.empty()) {
@@ -1097,13 +1076,10 @@ void CWindowOverview::draw() {
         }
     }
 
-    if (filterAnimating && FILTER_PROGRESS >= 1.0) {
+    if (filterAnimating && filterTransitionVisibleAmount() >= 1.0) {
         filterAnimating = false;
         exitingPreviews.clear();
     }
-
-    if (isAnimating())
-        damage();
 }
 
 void CWindowOverview::damage() {
@@ -1535,4 +1511,18 @@ void CWindowOverview::close(bool focusSelection, bool bringSelection,
 
     if (animationComplete())
         finishClose();
+}
+
+bool windowOverviewActive() {
+    return g_pWindowOverview != nullptr;
+}
+
+void closeWindowOverviewImmediately() {
+    const auto MONITOR = g_pWindowOverview ? g_pWindowOverview->pMonitor.lock() : nullptr;
+    g_pWindowOverview.reset();
+
+    if (g_pHyprRenderer)
+        g_pHyprRenderer->m_renderPass.removeAllOfType("CWinviewPassElement");
+    if (MONITOR && g_pHyprRenderer)
+        g_pHyprRenderer->damageMonitor(MONITOR);
 }

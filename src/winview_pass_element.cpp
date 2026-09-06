@@ -3,14 +3,18 @@
 #include <hyprland/src/output/Monitor.hpp>
 
 std::vector<UP<IPassElement>> CWinviewPassElement::draw() {
-    if (g_pWindowOverview)
-        g_pWindowOverview->draw();
+    if (g_pWindowOverview) {
+        if (foreground)
+            g_pWindowOverview->drawForeground();
+        else
+            g_pWindowOverview->drawBackground();
+    }
 
     return {};
 }
 
 bool CWinviewPassElement::needsLiveBlur() {
-    return g_pWindowOverview && g_pWindowOverview->backgroundBlurEnabled();
+    return !foreground && g_pWindowOverview && g_pWindowOverview->backgroundBlurEnabled();
 }
 
 bool CWinviewPassElement::needsPrecomputeBlur() {
@@ -25,7 +29,7 @@ std::optional<CBox> CWinviewPassElement::boundingBox() {
 }
 
 CRegion CWinviewPassElement::opaqueRegion() {
-    if (!g_pWindowOverview || !g_pWindowOverview->pMonitor)
+    if (foreground || !g_pWindowOverview || !g_pWindowOverview->pMonitor)
         return {};
 
     if (!g_pWindowOverview->occludesScene())

@@ -1,16 +1,25 @@
 # hyprwinview
 
-`hyprwinview` is an experimental Hyprland plugin that shows an overview of open
-windows regardless of which workspace they are on.
+`hyprwinview` is an experimental Hyprland plugin providing both window and
+workspace overviews from one loaded plugin.
 
-The current version is a first working foundation:
+The window overview shows open windows regardless of which workspace they are
+on. The embedded workspace overview is derived from
+[Hyprtasking](https://github.com/raybbian/hyprtasking) and renders live workspace
+previews with grid and linear layouts. Keeping both modes in one binary gives
+the rendering hooks, input capture, and overview lifecycle a single owner.
 
-- snapshots mapped windows into an overview grid
+The current version provides:
+
+- continuously live-renders mapped windows into an overview grid, including
+  windows on inactive workspaces
 - sizes the grid from window count and monitor aspect ratio
 - focuses the hovered window
 - can bring the hovered window to the current workspace before focusing it
 - supports keyboard navigation while the overview is active
 - shows window title/class labels and supports type-to-filter narrowing
+- preserves Hyprtasking's live workspace overview, navigation, and drag-and-drop
+- prevents the window and workspace modes from owning rendering or input simultaneously
 
 ## Demo
 
@@ -58,6 +67,25 @@ Load the plugin:
 ```lua
 hl.exec_once("hyprctl plugin load /path/to/libhyprwinview.so")
 ```
+
+Do not also load `libhyprtasking.so`. The combined plugin retains the existing
+`hyprtasking:*` dispatchers, `hl.plugin.hyprtasking.*` Lua functions, and
+`plugin.hyprtasking` configuration namespace for compatibility.
+
+## Workspace Overview
+
+Existing Hyprtasking bindings continue to work:
+
+```lua
+hl.bind("SUPER + Tab", function() hl.plugin.hyprtasking.toggle("cursor") end)
+hl.bind("SUPER + Left", function() hl.plugin.hyprtasking.move("left") end)
+hl.bind("SUPER + Right", function() hl.plugin.hyprtasking.move("right") end)
+```
+
+The workspace mode retains Hyprtasking's `grid` and `linear` layouts and its
+configuration under `plugin.hyprtasking`. Opening one overview mode immediately
+releases the other mode, so live workspace rendering cannot modify window-mode
+render passes.
 
 Example bindings:
 
@@ -169,9 +197,9 @@ keeps the current narrowed set so normal navigation can continue over the
 matches.
 
 `show_window_text` controls the per-window title/class labels. The text is drawn
-over each window snapshot with a configurable font, size, color, backplate, and
-padding. `filter_animation_ms` controls the short transition used when filter
-matches narrow or expand the grid.
+over each live window preview with a configurable font, size, color, backplate,
+and padding. `filter_animation_ms` controls the short transition used when
+filter matches narrow or expand the grid.
 
 `background` controls the full-screen overview tint. Use a low alpha like
 `rgba(10101466)` to leave the wallpaper visible, `rgba(10101400)` for no tint,
@@ -193,8 +221,20 @@ on an axis (`0.0` is left/top, `0.5` is center, `1.0` is right/bottom). Margins
 are logical pixels plus optional relative tile fractions; offsets are final
 logical-pixel nudges.
 
+When app icons are enabled, the plugin eagerly resolves and decodes icons for
+open windows on a background worker. It warms new applications and monitor
+scales as they appear, and refreshes theme settings periodically. Ready icons
+upload during normal rendering, at most one per render callback. If an icon is
+still loading when the overview opens, the window preview appears immediately
+and the icon fills in when ready.
+
 App icons are resolved through freedesktop icon themes before falling back to a
-plain filesystem search. `app_icon_theme_source` accepts `auto`, `gtk`, `qt`,
+plain filesystem search. The worker indexes fallback directories once, sharing
+the index across applications and icon sizes. GTK/Qt theme settings are checked
+at most once per second; explicit plugin theme changes queue new lookups
+immediately. Setting `show_app_icon = 0` stops queuing warmup work.
+
+`app_icon_theme_source` accepts `auto`, `gtk`, `qt`,
 `none`, or `legacy`; `auto` reads GTK settings and Qt/KDE settings, preferring
 Qt first on KDE/LXQt sessions. Set `app_icon_theme` to force a specific icon
 theme name, for example `Papirus-Dark`. Set `app_icon_overrides` to a

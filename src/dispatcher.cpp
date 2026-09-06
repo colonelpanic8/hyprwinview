@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "overview.hpp"
+#include "workspace/module.hpp"
 
 namespace {
     struct SWinviewDispatcherArgs {
@@ -191,7 +192,8 @@ SDispatchResult onWinviewDispatcher(const std::string& arg) {
 
             auto options              = ARGS->options;
             options.startInFilterMode = true;
-            g_pWindowOverview         = std::make_unique<CWindowOverview>(MONITOR, options);
+            closeWorkspaceOverviewImmediately();
+            g_pWindowOverview = std::make_unique<CWindowOverview>(MONITOR, options);
         }
         return {};
     }
@@ -200,6 +202,7 @@ SDispatchResult onWinviewDispatcher(const std::string& arg) {
     if (!MONITOR)
         return {.success = false, .error = "no focused monitor"};
 
+    closeWorkspaceOverviewImmediately();
     g_pWindowOverview = std::make_unique<CWindowOverview>(MONITOR, ARGS->options);
     return {};
 }

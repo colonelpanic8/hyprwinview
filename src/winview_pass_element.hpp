@@ -7,7 +7,7 @@ class CWindowOverview;
 
 class CWinviewPassElement : public IPassElement {
   public:
-    CWinviewPassElement()           = default;
+    explicit CWinviewPassElement(bool foreground) : foreground(foreground) {}
     ~CWinviewPassElement() override = default;
 
     std::vector<UP<IPassElement>> draw() override;
@@ -23,6 +23,9 @@ class CWinviewPassElement : public IPassElement {
     ePassElementType type() override {
         return EK_CUSTOM;
     }
+
+  private:
+    bool foreground = false;
 };
 
 #endif
