@@ -78,12 +78,12 @@ void render_window_at_box(PHLWINDOW window, PHLMONITOR monitor, const Time::stea
     box.x -= monitor->m_position.x;
     box.y -= monitor->m_position.y;
 
-    const float    scale = box.w / window->sizeAnimation()->value().x;
-    const Vector2D transform =
-        (monitor->m_position - window->positionAnimation()->value() + box.pos() / scale) *
-        monitor->m_scale;
+    // ignorePosition draws the window at the monitor origin, sidestepping the workspace
+    // render offset that stays non-zero for slid-out workspaces.
+    const float    scale     = box.w / window->sizeAnimation()->value().x;
+    const Vector2D transform = (box.pos() / scale - window->m_floatingOffset) * monitor->m_scale;
 
-    const CBox clip = CBox{box.pos(), box.size()}.scale(monitor->m_scale).round();
+    const CBox     clip = CBox{box.pos(), box.size()}.scale(monitor->m_scale).round();
     addOverviewRenderContext(true, clip, alpha);
 
     SRenderModifData data{};
@@ -93,7 +93,7 @@ void render_window_at_box(PHLWINDOW window, PHLMONITOR monitor, const Time::stea
         makeUnique<CRendererHintsPassElement>(CRendererHintsPassElement::SData{data}));
 
     ((render_window_t)render_window)(g_pHyprRenderer.get(), window, monitor, time, true,
-                                     RENDER_PASS_MAIN, false, true);
+                                     RENDER_PASS_MAIN, true, true);
 
     g_pHyprRenderer->m_renderPass.add(makeUnique<CRendererHintsPassElement>(
         CRendererHintsPassElement::SData{SRenderModifData{}}));
