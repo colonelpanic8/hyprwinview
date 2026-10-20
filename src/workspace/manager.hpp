@@ -3,6 +3,9 @@
 #include <hyprland/src/desktop/DesktopTypes.hpp>
 #include <hyprland/src/devices/IKeyboard.hpp>
 #include <hyprland/src/helpers/AnimatedVariable.hpp>
+#include <hyprland/src/render/Texture.hpp>
+#include <string>
+#include <unordered_map>
 #include <unordered_set>
 
 #include "overview.hpp"
@@ -26,7 +29,10 @@ class HTManager {
     void                 hide_all_views_immediately();
     void                 show_cursor_view();
 
-    void                 refresh_all_grid_caches();
+    void                 register_monitors();
+    void                 refresh_all_grid_caches(bool enforce_rules = true);
+    void                 mark_grid_caches_dirty();
+    void                 refresh_grid_caches_if_dirty(bool enforce_rules = true);
     void                 remove_view_for_monitor_id(MONITORID mid);
 
     bool                 start_window_drag();
@@ -51,4 +57,10 @@ class HTManager {
 
     bool                         has_active_view();
     bool                         cursor_view_active();
+
+    // Rasterized jump labels, owned here so the GL textures are released at plugin exit.
+    std::unordered_map<std::string, SP<Render::ITexture>> jump_label_textures;
+
+  private:
+    bool grid_caches_dirty = false;
 };

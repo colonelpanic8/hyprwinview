@@ -7,6 +7,9 @@
 
 #include <string>
 
+#include "overview/command.hpp"
+
 SDispatchResult onWinviewDispatcher(const std::string& arg);
+SDispatchResult runWinviewCommand(const Winview::SOverviewCommand& command);
 
 #endif

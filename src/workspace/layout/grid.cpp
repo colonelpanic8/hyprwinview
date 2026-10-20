@@ -35,6 +35,8 @@ HTLayoutGrid::HTLayoutGrid(VIEWID new_view_id) : HTLayoutBase(new_view_id) {
     auto& anim_tree = Config::animationTree();
     Animation::mgr()->createAnimation(
         {0, 0}, offset, anim_tree->getAnimationPropertyConfig("workspaces"), AVARDAMAGE_NONE);
+    // The temporary weak reference cannot release the animation's live unique owner.
+    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDelete)
     Animation::mgr()->createAnimation(
         1.f, scale, anim_tree->getAnimationPropertyConfig("workspaces"), AVARDAMAGE_NONE);
 
@@ -43,7 +45,7 @@ HTLayoutGrid::HTLayoutGrid(VIEWID new_view_id) : HTLayoutBase(new_view_id) {
 }
 
 // Bit layout: [layer:24][y:20][x:20]. Used purely as an unordered_map key;
-// limits are implicit and not enforced (grid dims are not validated).
+// dimensions are bounded by HT::MAX_GRID_DIMENSION.
 long long HTLayoutGrid::pack_slot(int layer, int x, int y) {
     return ((long long)layer << 40) | ((long long)(uint32_t)y << 20) | (long long)(uint32_t)x;
 }
@@ -61,11 +63,9 @@ void HTLayoutGrid::refresh_workspace_cache(
     if (monitor == nullptr)
         return;
 
-    const int ROWS   = HTConfig::value<Config::INTEGER>("grid:rows");
-    const int COLS   = HTConfig::value<Config::INTEGER>("grid:cols");
-    const int LAYERS = HTConfig::value<Config::INTEGER>("grid:layers");
-    if (ROWS <= 0 || COLS <= 0 || LAYERS <= 0)
-        return;
+    const int  ROWS   = HTConfig::positive_int("grid:rows");
+    const int  COLS   = HTConfig::positive_int("grid:cols");
+    const int  LAYERS = HTConfig::positive_int("grid:layers");
 
     const auto prior = ws_slot_cache;
 
@@ -222,8 +222,8 @@ std::string HTLayoutGrid::layout_name() {
 
 WORKSPACEID HTLayoutGrid::get_ws_id_in_direction(int x, int y, std::string& direction) {
     const int LOOP = HTConfig::value<Config::INTEGER>("grid:loop");
-    const int ROWS = HTConfig::value<Config::INTEGER>("grid:rows");
-    const int COLS = HTConfig::value<Config::INTEGER>("grid:cols");
+    const int ROWS = HTConfig::positive_int("grid:rows");
+    const int COLS = HTConfig::positive_int("grid:cols");
 
     if (direction == "up") {
         y--;
@@ -249,9 +249,9 @@ void HTLayoutGrid::on_move_swipe(Vector2D delta) {
     if (monitor == nullptr)
         return;
 
-    const float MOVE_DISTANCE = HTConfig::value<Config::FLOAT>("gestures:move_distance");
-    const int   ROWS          = HTConfig::value<Config::INTEGER>("grid:rows");
-    const int   COLS          = HTConfig::value<Config::INTEGER>("grid:cols");
+    const float MOVE_DISTANCE = HTConfig::positive_float("gestures:move_distance");
+    const int   ROWS          = HTConfig::positive_int("grid:rows");
+    const int   COLS          = HTConfig::positive_int("grid:cols");
     const CBox  min_ws        = calculate_ws_box(0, 0, HT_VIEW_CLOSED);
     const CBox  max_ws        = calculate_ws_box(COLS - 1, ROWS - 1, HT_VIEW_CLOSED);
 
@@ -290,8 +290,14 @@ void HTLayoutGrid::close_open_lerp(float perc) {
     Vector2D open_pos = {0, 0};
 
     build_overview_layout(HT_VIEW_CLOSED);
+    const PHLWORKSPACE active_workspace = monitor->m_activeWorkspace;
+    if (active_workspace == nullptr)
+        return;
+    const auto active_layout = overview_layout.find(active_workspace->m_id);
+    if (active_layout == overview_layout.end())
+        return;
     double   close_scale = 1.;
-    Vector2D close_pos   = -overview_layout[monitor->m_activeWorkspace->m_id].box.pos();
+    Vector2D close_pos   = -active_layout->second.box.pos();
 
     double   new_scale = std::lerp(close_scale, open_scale, perc);
     Vector2D new_pos   = Vector2D{std::lerp(close_pos.x, open_pos.x, perc),
@@ -330,8 +336,13 @@ void HTLayoutGrid::on_hide(CallbackFun on_complete) {
 
     build_overview_layout(HT_VIEW_CLOSED);
     *scale = 1.;
-    // End workspace to end up on
-    *offset = -overview_layout[monitor->m_activeWorkspace->m_id].box.pos();
+    // End workspace to end up on; without a slot, settle where the overview already is.
+    const PHLWORKSPACE active_workspace = monitor->m_activeWorkspace;
+    const auto         active_layout    = active_workspace == nullptr ?
+                   overview_layout.end() :
+                   overview_layout.find(active_workspace->m_id);
+    *offset =
+        active_layout == overview_layout.end() ? offset->goal() : -active_layout->second.box.pos();
 }
 
 void HTLayoutGrid::on_move(WORKSPACEID old_id, WORKSPACEID new_id, CallbackFun on_complete) {
@@ -345,13 +356,18 @@ void HTLayoutGrid::on_move(WORKSPACEID old_id, WORKSPACEID new_id, CallbackFun o
         return;
 
     // prevent the thing from animating
-    State::workspaceState()->query().id(old_id).run()->m_renderOffset->warp();
-    State::workspaceState()->query().id(new_id).run()->m_renderOffset->warp();
+    for (const WORKSPACEID id : {old_id, new_id}) {
+        if (const PHLWORKSPACE workspace = State::workspaceState()->query().id(id).run())
+            workspace->m_renderOffset->warp();
+    }
 
     build_overview_layout(HT_VIEW_CLOSED);
+    const auto target_layout = overview_layout.find(new_id);
+    if (target_layout == overview_layout.end())
+        return;
     *scale = 1.;
     // Target workspace to animate to
-    *offset = -overview_layout[new_id].box.pos();
+    *offset = -target_layout->second.box.pos();
 }
 
 bool HTLayoutGrid::should_render_window(PHLWINDOW window) {
@@ -416,8 +432,8 @@ CBox HTLayoutGrid::calculate_ws_box(int x, int y, HTViewStage stage) {
     if (monitor->m_transformedSize.x < 1 || monitor->m_transformedSize.y < 1)
         return {};
 
-    const int ROWS = HTConfig::value<Config::INTEGER>("grid:rows");
-    const int COLS = HTConfig::value<Config::INTEGER>("grid:cols");
+    const int ROWS = HTConfig::positive_int("grid:rows");
+    const int COLS = HTConfig::positive_int("grid:cols");
     const int GAPS_USE_ASPECT_RATIO =
         HTConfig::value<Config::INTEGER>("grid:gaps_use_aspect_ratio");
     const float    GAP_SIZE = HTConfig::value<Config::FLOAT>("gap_size") * monitor->m_scale;
@@ -438,7 +454,6 @@ CBox HTLayoutGrid::calculate_ws_box(int x, int y, HTViewStage stage) {
     // make correct aspect ratio
     if (render_y * mon_aspect > render_x) {
         start_offset.y = (render_y - render_x / mon_aspect) * ROWS / 2.f;
-        render_y       = render_x / mon_aspect;
     } else if (render_x / mon_aspect > render_y) {
         start_offset.x = (render_x - render_y * mon_aspect) * COLS / 2.f;
         render_x       = render_y * mon_aspect;
@@ -463,8 +478,8 @@ void HTLayoutGrid::build_overview_layout(HTViewStage stage) {
     if (monitor == nullptr)
         return;
 
-    const int        ROWS = HTConfig::value<Config::INTEGER>("grid:rows");
-    const int        COLS = HTConfig::value<Config::INTEGER>("grid:cols");
+    const int        ROWS = HTConfig::positive_int("grid:rows");
+    const int        COLS = HTConfig::positive_int("grid:cols");
 
     const PHLMONITOR last_monitor = Desktop::focusState()->monitor();
     Desktop::focusState()->rawMonitorFocus(monitor);

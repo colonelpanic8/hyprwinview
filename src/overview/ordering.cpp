@@ -1,4 +1,11 @@
 #include "../overview.hpp"
+#include "grouping.hpp"
+#include "../config_helpers.hpp"
+#include "../settings.hpp"
+
+using namespace WinviewConfig;
+using Winview::configStringOr;
+using Winview::trimmedLower;
 
 #include <algorithm>
 #include <cctype>
@@ -13,30 +20,10 @@
 #undef private
 #undef protected
 
-static const CConfigValue<Config::STRING>& PWINDOWORDER() {
-    static const CConfigValue<Config::STRING> VALUE("plugin:hyprwinview:window_order");
-    return VALUE;
-}
-
 struct SWindowOrderingStrategy {
     const char* name;
     std::string (*groupKeyForWindow)(const PHLWINDOW& window, size_t originalIndex);
 };
-
-static std::string trimmedLower(std::string token) {
-    auto notSpace = [](unsigned char c) { return !std::isspace(c); };
-    token.erase(token.begin(), std::ranges::find_if(token, notSpace));
-    token.erase(std::ranges::find_if(token.rbegin(), token.rend(), notSpace).base(), token.end());
-    std::ranges::transform(token, token.begin(), [](unsigned char c) { return std::tolower(c); });
-    return token;
-}
-
-static std::string configStringOr(const CConfigValue<Config::STRING>& value,
-                                  const std::string&                  fallback) {
-    try {
-        return *value;
-    } catch (...) { return fallback; }
-}
 
 static std::string uniqueWindowGroupKey(const PHLWINDOW&, size_t originalIndex) {
     return "window:" + std::to_string(originalIndex);
@@ -88,26 +75,14 @@ void CWindowOverview::applyWindowOrdering(std::vector<SWindowPreview>& windowPre
         return;
 
     const auto&              STRATEGY = activeWindowOrderingStrategy();
-    std::vector<std::string> groupOrder;
+    std::vector<std::string> groupKeys;
+    groupKeys.reserve(windowPreviews.size());
+    for (size_t i = 0; i < windowPreviews.size(); ++i)
+        groupKeys.push_back(STRATEGY.groupKeyForWindow(windowPreviews[i].window, i));
 
-    for (size_t i = 0; i < windowPreviews.size(); ++i) {
-        auto& preview               = windowPreviews[i];
-        preview.orderOriginalIndex  = i;
-        preview.orderGroupKey       = STRATEGY.groupKeyForWindow(preview.window, i);
-        const auto GROUP_ORDER_ITER = std::ranges::find(groupOrder, preview.orderGroupKey);
-
-        if (GROUP_ORDER_ITER == groupOrder.end()) {
-            preview.orderGroupIndex = groupOrder.size();
-            groupOrder.push_back(preview.orderGroupKey);
-        } else {
-            preview.orderGroupIndex = GROUP_ORDER_ITER - groupOrder.begin();
-        }
-    }
-
-    std::ranges::stable_sort(windowPreviews, [](const SWindowPreview& a, const SWindowPreview& b) {
-        if (a.orderGroupIndex != b.orderGroupIndex)
-            return a.orderGroupIndex < b.orderGroupIndex;
-
-        return a.orderOriginalIndex < b.orderOriginalIndex;
-    });
+    auto original = std::move(windowPreviews);
+    windowPreviews.clear();
+    windowPreviews.reserve(original.size());
+    for (const auto index : Winview::stableGroupOrder(groupKeys))
+        windowPreviews.push_back(std::move(original[index]));
 }

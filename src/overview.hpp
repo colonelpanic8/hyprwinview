@@ -3,50 +3,21 @@
 
 #define WLR_USE_UNSTABLE
 
+#include "overview/command.hpp"
+#include "overview/keys.hpp"
+#include "overview/labels.hpp"
+
 #include <chrono>
 #include <cstdint>
 #include <hyprland/src/desktop/DesktopTypes.hpp>
 #include <hyprland/src/event/EventBus.hpp>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
 #include <xkbcommon/xkbcommon.h>
 
-struct SWinviewKeyConfig {
-    std::vector<std::string> left;
-    std::vector<std::string> right;
-    std::vector<std::string> up;
-    std::vector<std::string> down;
-    std::vector<std::string> defaultAction;
-    std::vector<std::string> bring;
-    std::vector<std::string> bringReplace;
-    std::vector<std::string> close;
-    std::vector<std::string> filterToggle;
-    std::vector<std::string> filterClose;
-    std::vector<std::string> filterBring;
-    std::vector<std::string> filterBringReplace;
-    std::vector<std::string> filterLeft;
-    std::vector<std::string> filterRight;
-    std::vector<std::string> filterUp;
-    std::vector<std::string> filterDown;
-};
-
-enum class EWinviewDefaultAction : std::uint8_t {
-    SELECT,
-    BRING,
-    BRING_REPLACE,
-};
-
-struct SWindowOverviewOptions {
-    bool                  includeCurrentWorkspace = true;
-    bool                  startInFilterMode       = false;
-    EWinviewDefaultAction defaultAction           = EWinviewDefaultAction::SELECT;
-};
-
 class CEventLoopTimer;
-
-SWinviewKeyConfig defaultWinviewKeyConfig();
-void              setWinviewKeyConfig(SWinviewKeyConfig config);
 
 class CWindowOverview {
   public:
@@ -60,29 +31,29 @@ class CWindowOverview {
     void          close(bool focusSelection = false, bool bringSelection = false,
                         bool replaceInitialSelection = false);
     void          selectHoveredWindow();
+    void          selectAt(const Vector2D& globalPos);
     void          toggleFilterMode();
     bool          isAnimating() const;
     bool          backgroundBlurEnabled() const;
     bool          occludesScene() const;
+    bool          isClosing() const;
 
     PHLMONITORREF pMonitor;
 
   private:
     struct SWindowPreview {
-        PHLWINDOW   window;
-        CBox        tileLogical;
-        CBox        filterStartLogical;
-        std::string orderGroupKey;
-        size_t      orderOriginalIndex = 0;
-        size_t      orderGroupIndex    = 0;
+        PHLWINDOW window;
+        CBox      tileLogical;
+        CBox      filterStartLogical;
     };
 
     struct SFramePreview {
         PHLWINDOW window;
         CBox      tilePx;
-        double    visible     = 1.0;
-        double    windowAlpha = 1.0;
-        bool      selected    = false;
+        double    visible      = 1.0;
+        double    windowAlpha  = 1.0;
+        bool      selected     = false;
+        double    labelWidthPx = 0.0;
     };
 
     void                collectWindows();
@@ -95,9 +66,7 @@ class CWindowOverview {
     void                moveSelection(int dx, int dy);
     void                runSelected(bool bring, bool replaceInitial = false);
     void                runDefaultSelected();
-    bool                handleKey(const IKeyboard::SKeyEvent& event);
-    bool                handleFilterKey(const IKeyboard::SKeyEvent& event, xkb_keysym_t keysym,
-                                        xkb_state* keyboardState, uint32_t mods, const SWinviewKeyConfig& keys);
+    bool                handleKeyPress(const IKeyboard::SKeyEvent& event);
     bool                deleteFilterCharacter();
     void                startFilterDeleteRepeat();
     void                stopFilterDeleteRepeat();
@@ -119,6 +88,9 @@ class CWindowOverview {
     double filterTransitionVisibleAmount() const;
     bool   animationComplete() const;
 
+    COverviewLabels                       labels;
+    std::optional<Winview::SKeyBindings>  keyBindings;
+    uint64_t                              keyBindingsGeneration = 0;
     std::vector<SWindowPreview>           allPreviews;
     std::vector<SWindowPreview>           previews;
     std::vector<SWindowPreview>           exitingPreviews;
@@ -138,20 +110,28 @@ class CWindowOverview {
     bool                                  filterAnimating    = false;
     bool                                  filterDeleteHeld   = false;
     bool                                  cursorOverrideSet  = false;
+    bool                                  windowsDirty       = false;
     std::chrono::steady_clock::time_point animationStartedAt;
     std::chrono::steady_clock::time_point filterAnimationStartedAt;
 
     SP<CEventLoopTimer>                   filterDeleteRepeatTimer;
     CHyprSignalListener                   mouseMoveHook;
-    CHyprSignalListener                   mouseButtonHook;
-    CHyprSignalListener                   keyboardHook;
     CHyprSignalListener                   touchMoveHook;
     CHyprSignalListener                   touchDownHook;
+    std::vector<CHyprSignalListener>      windowChangeHooks;
+
+    friend void                           handleWindowOverviewKey(const IKeyboard::SKeyEvent& event,
+                                                                  Event::SCallbackInfo&       info);
 };
 
 inline std::unique_ptr<CWindowOverview> g_pWindowOverview;
 
 bool                                    windowOverviewActive();
 void                                    closeWindowOverviewImmediately();
+
+// Plugin-lifetime input routing; consumed releases are still swallowed after the overview closes.
+void handleWindowOverviewKey(const IKeyboard::SKeyEvent& event, Event::SCallbackInfo& info);
+void handleWindowOverviewButton(const IPointer::SButtonEvent& event, Event::SCallbackInfo& info);
+void resetWindowOverviewInput();
 
 #endif

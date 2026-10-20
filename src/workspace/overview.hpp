@@ -10,6 +10,7 @@
 #include <optional>
 
 #include "layout/layout_base.hpp"
+#include "limits.hpp"
 
 typedef long VIEWID;
 
@@ -27,12 +28,16 @@ class HTView {
 
     SP<HTLayoutBase> layout;
 
-    void             do_exit_behavior(bool exit_on_mouse);
-    void             warp_window(Config::INTEGER warp, PHLWINDOW window);
+    // Invalidates end callbacks left on the layout's animation variables by earlier
+    // show/hide/move transitions.
+    HT::CTransition transition;
 
-    PHLMONITOR       get_monitor();
+    void            do_exit_behavior(bool exit_on_mouse);
+    void            warp_window(Config::INTEGER warp, PHLWINDOW window);
 
-    void             show(bool recalculate = true);
+    PHLMONITOR      get_monitor();
+
+    void            show(bool recalculate = true);
     void hide(bool exit_on_mouse, std::optional<WORKSPACEID> target_workspace = std::nullopt);
     void hideImmediately();
 

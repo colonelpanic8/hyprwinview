@@ -14,6 +14,7 @@
 #include "config.hpp"
 #include "manager.hpp"
 #include "overview.hpp"
+#include "../overview.hpp"
 
 bool HTManager::start_window_drag() {
     const PHLMONITOR cursor_monitor =
@@ -52,15 +53,16 @@ bool HTManager::start_window_drag() {
     if (target == nullptr)
         return false;
 
-    const PHLWINDOW dragged_window = target->window();
+    const PHLWINDOW  dragged_window = target->window();
+    const PHLMONITOR dragged_monitor =
+        dragged_window == nullptr ? nullptr : dragged_window->m_monitor.lock();
     if (dragged_window != nullptr) {
-        if (g_layoutManager->dragController()->draggingTiled()) {
+        if (g_layoutManager->dragController()->draggingTiled() && dragged_monitor != nullptr) {
             const Vector2D pre_pos = cursor_view->layout->local_ws_unscaled_to_global(
-                dragged_window->positionAnimation()->value() -
-                    dragged_window->m_monitor->m_position,
+                dragged_window->positionAnimation()->value() - dragged_monitor->m_position,
                 workspace_id);
             const Vector2D post_pos = cursor_view->layout->local_ws_unscaled_to_global(
-                dragged_window->positionAnimation()->goal() - dragged_window->m_monitor->m_position,
+                dragged_window->positionAnimation()->goal() - dragged_monitor->m_position,
                 workspace_id);
             const Vector2D mapped_pre_pos =
                 (pre_pos - mouse_coords) / cursor_view->layout->drag_window_scale() + mouse_coords;
@@ -123,12 +125,15 @@ bool HTManager::end_window_drag() {
         cursor_workspace = State::workspaceState()->create(workspace_id, cursor_monitor->m_id);
     } else if (workspace_id == WORKSPACE_INVALID) {
         cursor_workspace = dragged_window->m_workspace;
-        // Ensure that the mouse coords are snapped to inside the workspace box itself
-        use_mouse_coords = cursor_view->layout->get_global_ws_box(cursor_workspace->m_id)
-                               .closestPoint(use_mouse_coords);
+        if (cursor_workspace != nullptr) {
+            // Ensure that the mouse coords are snapped to inside the workspace box itself
+            use_mouse_coords = cursor_view->layout->get_global_ws_box(cursor_workspace->m_id)
+                                   .closestPoint(use_mouse_coords);
 
-        Log::logger->log(LOG, "[Hyprtasking] Dragging to invalid position, snapping to last ws {}",
-                         cursor_workspace->m_id);
+            Log::logger->log(LOG,
+                             "[Hyprtasking] Dragging to invalid position, snapping to last ws {}",
+                             cursor_workspace->m_id);
+        }
     }
 
     if (cursor_workspace == nullptr) {
@@ -295,7 +300,7 @@ bool HTManager::swipe_update(IPointer::SSwipeUpdateEvent e) {
         return false;
 
     const unsigned int MOVE_FINGERS  = HTConfig::value<Config::INTEGER>("gestures:move_fingers");
-    const float        OPEN_DISTANCE = HTConfig::value<Config::FLOAT>("gestures:open_distance");
+    const float        OPEN_DISTANCE = HTConfig::positive_float("gestures:open_distance");
     const unsigned int OPEN_FINGERS  = HTConfig::value<Config::INTEGER>("gestures:open_fingers");
     const int          OPEN_POSITIVE = HTConfig::value<Config::INTEGER>("gestures:open_positive");
 
@@ -340,6 +345,8 @@ bool HTManager::swipe_update(IPointer::SSwipeUpdateEvent e) {
             if (cursor_view->active) {
                 return res;
             } else {
+                closeWindowOverviewImmediately();
+                refresh_grid_caches_if_dirty();
                 swipe_state             = HT_SWIPE_MOVE;
                 cursor_view->navigating = true;
 
@@ -364,7 +371,7 @@ bool HTManager::swipe_end() {
 
     switch (swipe_state) {
         case HT_SWIPE_OPEN: {
-            const float OPEN_DISTANCE = HTConfig::value<Config::FLOAT>("gestures:open_distance");
+            const float OPEN_DISTANCE = HTConfig::positive_float("gestures:open_distance");
             const float swipe_perc    = 1.0 - std::clamp(swipe_amt / OPEN_DISTANCE, 0.01f, 1.0f);
             if (swipe_perc >= 0.5) {
                 cursor_view->show(false);

@@ -1,4 +1,5 @@
 #include "app_icon_loader.hpp"
+#include "strings.hpp"
 
 #include <algorithm>
 #include <filesystem>
@@ -69,37 +70,66 @@ namespace AppIconLoader {
             return target;
         }
 
-        Icon loadIcon(const SRequest& request, const std::stop_token&) {
-            const auto PATH =
-                AppIconLookup::findAppIconPath(request.appIds, request.sizePx, request.config);
-            if (!PATH)
+        Icon decode(const std::string& path, int sizePx) {
+            const bool SVG =
+                Winview::lowercase(std::filesystem::path(path).extension().string()) == ".svg";
+            auto* surface = SVG ? renderSvg(path, sizePx) : renderPng(path, sizePx);
+            if (!surface)
                 return nullptr;
-
-            using Key = std::pair<std::string, int>;
-            thread_local std::map<Key, Icon> images;
-            const Key                        KEY{*PATH, request.sizePx};
-            if (const auto IT = images.find(KEY); IT != images.end())
-                return IT->second;
-
-            const bool SVG = AppIconLookup::lowercase(
-                                 std::filesystem::path(*PATH).extension().string()) == ".svg";
-            auto* surface =
-                SVG ? renderSvg(*PATH, request.sizePx) : renderPng(*PATH, request.sizePx);
-            Icon icon;
-            if (surface && cairo_surface_status(surface) == CAIRO_STATUS_SUCCESS) {
-                cairo_surface_flush(surface);
-                icon = std::make_shared<SLoadedIcon>(
-                    *PATH, request.sizePx,
-                    std::shared_ptr<cairo_surface_t>(surface, cairo_surface_destroy));
-            } else if (surface)
+            if (cairo_surface_status(surface) != CAIRO_STATUS_SUCCESS) {
                 cairo_surface_destroy(surface);
-            images.emplace(KEY, icon);
-            return icon;
+                return nullptr;
+            }
+            cairo_surface_flush(surface);
+            return std::make_shared<SLoadedIcon>(
+                path, sizePx, std::shared_ptr<cairo_surface_t>(surface, cairo_surface_destroy));
         }
+
+        class CFileSource final : public ISource {
+          public:
+            Icon load(const SRequest& request, const std::stop_token& stop) override {
+                const auto PATH =
+                    m_resolver.find(request.appIds, request.sizePx, request.config, stop);
+                if (!PATH || stop.stop_requested())
+                    return nullptr;
+
+                const Key KEY{*PATH, request.sizePx};
+                if (const auto IT = m_images.find(KEY); IT != m_images.end()) {
+                    if (auto icon = IT->second.lock())
+                        return icon;
+                }
+
+                std::erase_if(m_images, [](const auto& entry) { return entry.second.expired(); });
+                auto icon = decode(*PATH, request.sizePx);
+                if (icon)
+                    m_images[KEY] = icon;
+                return icon;
+            }
+
+            void reset() override {
+                m_resolver.clear();
+                m_images.clear();
+            }
+
+            bool refresh() override {
+                return m_resolver.refreshThemes();
+            }
+
+          private:
+            using Key = std::pair<std::string, int>;
+
+            AppIconLookup::CResolver                        m_resolver;
+            std::map<Key, std::weak_ptr<const SLoadedIcon>> m_images;
+        };
     }
 
-    CLoader::CLoader(LoadFunction load) :
-        m_load(load ? std::move(load) : loadIcon),
+    std::unique_ptr<ISource> makeFileSource() {
+        return std::make_unique<CFileSource>();
+    }
+
+    CLoader::CLoader(std::unique_ptr<ISource> source, SOptions options) :
+        m_source(std::move(source)),
+        m_options{options.pollInterval, std::max<size_t>(1, options.maxEntries)},
         m_worker([this](const std::stop_token& stop) { run(stop); }) {}
 
     CLoader::~CLoader() {
@@ -113,15 +143,14 @@ namespace AppIconLoader {
             return Icon{};
 
         std::lock_guard lock(m_mutex);
-        auto&           entry = m_entries[request];
-        const auto      NOW   = std::chrono::steady_clock::now();
-        if (!entry.pending && (!entry.result || NOW - entry.queuedAt >= std::chrono::seconds(1))) {
-            entry.pending  = true;
-            entry.queuedAt = NOW;
+        const auto [IT, INSERTED] = m_entries.try_emplace(request);
+        IT->second.lastUsed       = ++m_clock;
+        if (INSERTED) {
             m_queue.push_back(request);
             m_wake.notify_one();
+            evictLocked();
         }
-        return entry.result;
+        return IT->second.result;
     }
 
     Icon CLoader::takeReady() {
@@ -133,29 +162,81 @@ namespace AppIconLoader {
         return icon;
     }
 
+    void CLoader::invalidate() {
+        std::lock_guard lock(m_mutex);
+        m_resetPending = true;
+        requeueAllLocked();
+        m_wake.notify_one();
+    }
+
+    void CLoader::requeueAllLocked() {
+        ++m_generation;
+        m_queue.clear();
+        for (const auto& [request, entry] : m_entries)
+            m_queue.push_back(request);
+    }
+
+    void CLoader::evictLocked() {
+        while (m_entries.size() > m_options.maxEntries) {
+            const auto OLDEST = std::ranges::min_element(
+                m_entries, {}, [](const auto& entry) { return entry.second.lastUsed; });
+            std::erase(m_queue, OLDEST->first);
+            m_entries.erase(OLDEST);
+        }
+    }
+
     void CLoader::run(const std::stop_token& stop) {
         while (!stop.stop_requested()) {
             SRequest request;
+            uint64_t generation = 0;
+            bool     reset      = false;
             {
                 std::unique_lock lock(m_mutex);
-                if (!m_wake.wait(lock, stop, [this] { return !m_queue.empty(); }) ||
-                    stop.stop_requested())
+                if (!m_wake.wait_for(lock, stop, m_options.pollInterval,
+                                     [this] { return !m_queue.empty(); })) {
+                    if (stop.stop_requested())
+                        return;
+                    lock.unlock();
+                    bool changed = false;
+                    try {
+                        changed = m_source->refresh();
+                    } catch (...) { continue; }
+                    if (changed) {
+                        lock.lock();
+                        requeueAllLocked();
+                    }
+                    continue;
+                }
+                if (stop.stop_requested())
                     return;
                 request = std::move(m_queue.front());
                 m_queue.pop_front();
+                if (!m_entries.contains(request))
+                    continue;
+                generation = m_generation;
+                reset      = std::exchange(m_resetPending, false);
             }
 
             Icon icon;
             try {
-                icon = m_load(request, stop);
+                if (reset)
+                    m_source->reset();
+                icon = m_source->load(request, stop);
             } catch (...) { icon.reset(); }
+            if (stop.stop_requested())
+                return;
 
             std::lock_guard lock(m_mutex);
-            auto&           entry = m_entries.at(request);
-            if (icon && (!entry.result || *entry.result != icon))
+            const auto      IT = m_entries.find(request);
+            if (generation != m_generation || IT == m_entries.end())
+                continue;
+            auto& entry = IT->second;
+            if (icon && (!entry.result || *entry.result != icon)) {
+                if (m_ready.size() >= m_options.maxEntries)
+                    m_ready.pop_front();
                 m_ready.push_back(icon);
-            entry.result  = std::move(icon);
-            entry.pending = false;
+            }
+            entry.result = std::move(icon);
         }
     }
 }

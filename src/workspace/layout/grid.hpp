@@ -13,7 +13,7 @@ struct HTGridSlot {
     int y;
 };
 
-class HTLayoutGrid : public HTLayoutBase {
+class HTLayoutGrid final : public HTLayoutBase {
   private:
     PHLANIMVAR<float>    scale;
     PHLANIMVAR<Vector2D> offset;

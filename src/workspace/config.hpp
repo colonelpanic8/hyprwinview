@@ -7,6 +7,7 @@
 #include <hyprutils/math/Vector2D.hpp>
 
 #include "globals.hpp"
+#include "limits.hpp"
 
 using namespace Config::Values;
 
@@ -22,6 +23,14 @@ namespace HTConfig {
         }
 
         return *cache[config];
+    }
+
+    inline int positive_int(const std::string& config) {
+        return HT::positive_count(value<Config::INTEGER>(config));
+    }
+
+    inline float positive_float(const std::string& config) {
+        return static_cast<float>(HT::positive_distance(value<Config::FLOAT>(config)));
     }
 
 } // namespace HTConfig

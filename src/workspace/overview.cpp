@@ -40,9 +40,17 @@ void HTView::change_layout(const std::string& layout_name) {
         layout = makeShared<HTLayoutGrid>(monitor_id);
     } else if (layout_name == "linear") {
         layout = makeShared<HTLayoutLinear>(monitor_id);
-    } else {
+    } else if (layout == nullptr) {
         fail_exit("Bad overview layout name {}, supported ones are 'grid' and 'linear'",
                   layout_name);
+    } else {
+        // Throwing from a config.reloaded listener would escape into Hyprland.
+        const std::string ERROR = std::format(
+            "[Hyprtasking] Bad overview layout name {}, supported ones are 'grid' and 'linear'",
+            layout_name);
+        Log::logger->log(ERR, "{}", ERROR);
+        HyprlandAPI::addNotification(PHANDLE, ERROR, CHyprColor{1.0, 0.2, 0.2, 1.0}, 5000);
+        layout->init_position();
     }
 }
 
@@ -61,10 +69,14 @@ void HTView::do_exit_behavior(bool exit_on_mouse) {
         return layout->get_ws_id_from_global(mouse_coords);
     };
 
-    const int         EXIT_ON_HOVERED = HTConfig::value<Config::INTEGER>("exit_on_hovered");
+    const int          EXIT_ON_HOVERED = HTConfig::value<Config::INTEGER>("exit_on_hovered");
+
+    const PHLWORKSPACE active_workspace = monitor->m_activeWorkspace;
+    if (active_workspace == nullptr)
+        return;
 
     const WORKSPACEID ws_id =
-        (exit_on_mouse || EXIT_ON_HOVERED) ? try_get_hover_id() : monitor->m_activeWorkspace->m_id;
+        (exit_on_mouse || EXIT_ON_HOVERED) ? try_get_hover_id() : active_workspace->m_id;
     PHLWORKSPACE workspace = State::workspaceState()->query().id(ws_id).run();
 
     if (workspace == nullptr && ws_id != WORKSPACE_INVALID)
@@ -84,7 +96,9 @@ void HTView::show(bool recalculate) {
         return;
 
     closeWindowOverviewImmediately();
+    ht_manager->refresh_all_grid_caches();
 
+    transition.begin();
     active     = true;
     closing    = false;
     navigating = false;
@@ -104,6 +118,7 @@ void HTView::show(bool recalculate) {
 void HTView::hideImmediately() {
     const PHLMONITOR monitor = get_monitor();
 
+    transition.begin();
     active     = false;
     closing    = false;
     navigating = false;
@@ -119,11 +134,10 @@ void HTView::hideImmediately() {
 
 void HTView::hide(bool exit_on_mouse, std::optional<WORKSPACEID> target_workspace) {
     const PHLMONITOR monitor = get_monitor();
-    if (monitor == nullptr)
+    if (monitor == nullptr || monitor->m_activeWorkspace == nullptr) {
+        hideImmediately();
         return;
-    const PHLWORKSPACE active_workspace = monitor->m_activeWorkspace;
-    if (active_workspace == nullptr)
-        return;
+    }
 
     if (target_workspace.has_value()) {
         PHLWORKSPACE workspace = State::workspaceState()->query().id(*target_workspace).run();
@@ -136,11 +150,14 @@ void HTView::hide(bool exit_on_mouse, std::optional<WORKSPACEID> target_workspac
         do_exit_behavior(exit_on_mouse);
     }
 
-    active     = true;
-    closing    = true;
-    navigating = false;
+    const uint64_t TRANSITION = transition.begin();
+    active                    = true;
+    closing                   = true;
+    navigating                = false;
 
-    layout->on_hide([this](auto self) {
+    layout->on_hide([this, TRANSITION](auto) {
+        if (!transition.is_current(TRANSITION))
+            return;
         active  = false;
         closing = false;
     });
@@ -164,6 +181,7 @@ void HTView::warp_window(Config::INTEGER warp, PHLWINDOW window) {
 }
 
 void HTView::move_id(WORKSPACEID ws_id, bool move_window) {
+    closeWindowOverviewImmediately();
     navigating = false;
     if (closing)
         return;
@@ -201,12 +219,18 @@ void HTView::move_id(WORKSPACEID ws_id, bool move_window) {
     }
     warp_window(warp, hovered_window);
 
-    navigating = true;
-    layout->on_move(active_workspace->m_id, other_workspace->m_id,
-                    [this](auto self) { navigating = false; });
+    const uint64_t TRANSITION = transition.begin();
+    navigating                = true;
+    layout->on_move(active_workspace->m_id, other_workspace->m_id, [this, TRANSITION](auto) {
+        if (transition.is_current(TRANSITION))
+            navigating = false;
+    });
 }
 
 void HTView::move(std::string arg, bool move_window) {
+    closeWindowOverviewImmediately();
+    ht_manager->refresh_grid_caches_if_dirty();
+
     const PHLMONITOR monitor = get_monitor();
     if (monitor == nullptr)
         return;
@@ -225,8 +249,11 @@ void HTView::move(std::string arg, bool move_window) {
     } else {
         layout->build_overview_layout(HT_VIEW_CLOSED);
     }
-    const auto        ws_layout = layout->overview_layout[source_ws_id];
-    const WORKSPACEID id        = layout->get_ws_id_in_direction(ws_layout.x, ws_layout.y, arg);
+    const auto ws_layout = layout->overview_layout.find(source_ws_id);
+    if (ws_layout == layout->overview_layout.end())
+        return;
+    const WORKSPACEID id =
+        layout->get_ws_id_in_direction(ws_layout->second.x, ws_layout->second.y, arg);
 
     move_id(id, move_window);
 }

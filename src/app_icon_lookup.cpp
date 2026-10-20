@@ -1,8 +1,8 @@
 #include "app_icon_lookup.hpp"
+#include "strings.hpp"
 
 #include <algorithm>
 #include <cctype>
-#include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -14,11 +14,8 @@
 #include <unordered_set>
 
 namespace AppIconLookup {
-    std::string lowercase(std::string value) {
-        std::ranges::transform(value, value.begin(),
-                               [](unsigned char c) { return std::tolower(c); });
-        return value;
-    }
+    using Winview::lowercase;
+    using Winview::trim;
 
     namespace {
         namespace fs = std::filesystem;
@@ -48,41 +45,18 @@ namespace AppIconLookup {
 
         using SIniData = std::map<std::string, std::map<std::string, std::string>>;
 
-        thread_local std::unordered_map<std::string, std::optional<SDesktopEntry>>
-            g_desktopEntryCache;
-        thread_local std::unordered_map<std::string, std::optional<std::string>> g_iconPathCache;
-        thread_local std::unordered_map<std::string, std::optional<SIconTheme>>  g_iconThemeCache;
-        thread_local std::optional<std::vector<SDesktopEntry>>                   g_desktopEntries;
-        thread_local std::optional<std::unordered_map<std::string, std::vector<fs::path>>>
-            g_legacyIconIndex;
-
-        struct SThemeNamesCache {
-            std::string                           theme;
-            std::string                           source;
-            std::vector<std::string>              names;
-            std::chrono::steady_clock::time_point refreshedAt;
+        struct SResolverState {
+            std::unordered_map<std::string, std::optional<SDesktopEntry>>         desktopEntryCache;
+            std::unordered_map<std::string, std::optional<std::string>>           iconPathCache;
+            std::unordered_map<std::string, std::optional<SIconTheme>>            iconThemeCache;
+            std::optional<std::vector<SDesktopEntry>>                             desktopEntries;
+            std::optional<std::unordered_map<std::string, std::vector<fs::path>>> legacyIconIndex;
+            std::map<std::pair<std::string, std::string>, std::vector<std::string>> themeNames;
         };
-
-        thread_local std::optional<SThemeNamesCache> g_themeNamesCache;
 
         // Prefer a larger raster over upscaling a smaller one whenever the theme
         // provides one; the rendered texture is still capped by app_icon_size.
-        constexpr int        UNDERSIZED_RASTER_PENALTY = 1'000'000;
-
-        thread_local SConfig g_config;
-
-        std::string          trim(std::string value) {
-            const auto BEGIN =
-                std::ranges::find_if_not(value, [](unsigned char c) { return std::isspace(c); });
-            const auto END = std::find_if_not(value.rbegin(), value.rend(), [](unsigned char c) {
-                                 return std::isspace(c);
-                             }).base();
-
-            if (BEGIN >= END)
-                return "";
-
-            return std::string(BEGIN, END);
-        }
+        constexpr int            UNDERSIZED_RASTER_PENALTY = 1'000'000;
 
         std::vector<std::string> splitList(const std::string& value, char delimiter) {
             std::vector<std::string> result;
@@ -292,9 +266,10 @@ namespace AppIconLookup {
             return entry;
         }
 
-        const std::vector<SDesktopEntry>& desktopEntries() {
-            if (g_desktopEntries)
-                return *g_desktopEntries;
+        const std::vector<SDesktopEntry>* desktopEntries(SResolverState&        state,
+                                                         const std::stop_token& stop) {
+            if (state.desktopEntries)
+                return &*state.desktopEntries;
 
             std::vector<SDesktopEntry> entries;
 
@@ -308,6 +283,8 @@ namespace AppIconLookup {
                          it(APPDIR, fs::directory_options::skip_permission_denied, ec),
                      end;
                      it != end; it.increment(ec)) {
+                    if (stop.stop_requested())
+                        return nullptr;
                     if (ec || !it->is_regular_file(ec) || it->path().extension() != ".desktop")
                         continue;
 
@@ -316,13 +293,16 @@ namespace AppIconLookup {
                 }
             }
 
-            g_desktopEntries = std::move(entries);
-            return *g_desktopEntries;
+            state.desktopEntries = std::move(entries);
+            return &*state.desktopEntries;
         }
 
-        std::optional<SDesktopEntry> findDesktopEntry(const std::string& appId) {
-            const auto KEY = lowercase(appId);
-            if (const auto IT = g_desktopEntryCache.find(KEY); IT != g_desktopEntryCache.end())
+        std::optional<SDesktopEntry> findDesktopEntry(SResolverState&        state,
+                                                      const std::string&     appId,
+                                                      const std::stop_token& stop) {
+            auto&      cache = state.desktopEntryCache;
+            const auto KEY   = lowercase(appId);
+            if (const auto IT = cache.find(KEY); IT != cache.end())
                 return IT->second;
 
             for (const auto& dir : dataDirs()) {
@@ -333,19 +313,23 @@ namespace AppIconLookup {
                         continue;
 
                     auto entry = parseDesktopFile(PATH);
-                    g_desktopEntryCache.emplace(KEY, entry);
+                    cache.emplace(KEY, entry);
                     return entry;
                 }
             }
 
-            for (const auto& entry : desktopEntries()) {
+            const auto* entries = desktopEntries(state, stop);
+            if (!entries)
+                return std::nullopt;
+
+            for (const auto& entry : *entries) {
                 if (lowercase(entry.id) == KEY || lowercase(entry.startupWMClass) == KEY) {
-                    g_desktopEntryCache.emplace(KEY, entry);
+                    cache.emplace(KEY, entry);
                     return entry;
                 }
             }
 
-            g_desktopEntryCache.emplace(KEY, std::nullopt);
+            cache.emplace(KEY, std::nullopt);
             return std::nullopt;
         }
 
@@ -435,9 +419,11 @@ namespace AppIconLookup {
                 (nominalSize >= sizePx ? 0 : 50);
         }
 
-        const std::optional<SIconTheme>& loadIconTheme(const std::string& themeName) {
+        const std::optional<SIconTheme>& loadIconTheme(SResolverState&    state,
+                                                       const std::string& themeName) {
+            auto&       cache     = state.iconThemeCache;
             const auto& CACHE_KEY = themeName;
-            if (const auto IT = g_iconThemeCache.find(CACHE_KEY); IT != g_iconThemeCache.end())
+            if (const auto IT = cache.find(CACHE_KEY); IT != cache.end())
                 return IT->second;
 
             SIconTheme              theme;
@@ -455,7 +441,7 @@ namespace AppIconLookup {
             }
 
             if (theme.roots.empty()) {
-                return g_iconThemeCache.emplace(CACHE_KEY, std::nullopt).first->second;
+                return cache.emplace(CACHE_KEY, std::nullopt).first->second;
             }
 
             if (indexPath) {
@@ -505,11 +491,11 @@ namespace AppIconLookup {
                 }
             }
 
-            return g_iconThemeCache.emplace(CACHE_KEY, std::move(theme)).first->second;
+            return cache.emplace(CACHE_KEY, std::move(theme)).first->second;
         }
 
         // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
-        std::optional<fs::path> findIconInTheme(const std::string& iconName,
+        std::optional<fs::path> findIconInTheme(SResolverState& state, const std::string& iconName,
                                                 const std::string& themeName, int sizePx,
                                                 std::unordered_set<std::string>& visited) {
             const auto& VISIT_KEY = themeName;
@@ -518,7 +504,7 @@ namespace AppIconLookup {
 
             visited.insert(VISIT_KEY);
 
-            const auto& THEME = loadIconTheme(themeName);
+            const auto& THEME = loadIconTheme(state, themeName);
             if (!THEME)
                 return std::nullopt;
 
@@ -554,12 +540,12 @@ namespace AppIconLookup {
                 return bestPath;
 
             for (const auto& inherited : THEME->inherits) {
-                if (auto path = findIconInTheme(iconName, inherited, sizePx, visited))
+                if (auto path = findIconInTheme(state, iconName, inherited, sizePx, visited))
                     return path;
             }
 
             if (VISIT_KEY != "hicolor")
-                return findIconInTheme(iconName, "hicolor", sizePx, visited);
+                return findIconInTheme(state, iconName, "hicolor", sizePx, visited);
 
             return std::nullopt;
         }
@@ -628,25 +614,25 @@ namespace AppIconLookup {
                 values.push_back(*value);
         }
 
-        bool themeLookupDisabled() {
-            if (!g_config.theme.empty())
+        bool themeLookupDisabled(const SConfig& config) {
+            if (!config.theme.empty())
                 return false;
 
-            const std::string SOURCE = lowercase(g_config.source);
+            const std::string SOURCE = lowercase(config.source);
             return SOURCE == "none" || SOURCE == "legacy";
         }
 
-        std::vector<std::string> readConfiguredThemeNames() {
+        std::vector<std::string> readConfiguredThemeNames(const SConfig& config) {
             std::vector<std::string> themes;
 
-            appendUnique(themes, g_config.theme);
+            appendUnique(themes, config.theme);
             if (!themes.empty())
                 return themes;
 
-            if (themeLookupDisabled())
+            if (themeLookupDisabled(config))
                 return themes;
 
-            const std::string SOURCE = lowercase(g_config.source);
+            const std::string SOURCE = lowercase(config.source);
             if (SOURCE == "gtk") {
                 appendUnique(themes, gtkIconThemeName());
                 return themes;
@@ -676,17 +662,12 @@ namespace AppIconLookup {
             return themes;
         }
 
-        const std::vector<std::string>& configuredThemeNames() {
-            const auto THEME  = g_config.theme;
-            const auto SOURCE = g_config.source;
-            const auto NOW    = std::chrono::steady_clock::now();
-            if (!g_themeNamesCache || g_themeNamesCache->theme != THEME ||
-                g_themeNamesCache->source != SOURCE ||
-                NOW - g_themeNamesCache->refreshedAt >= std::chrono::seconds(1)) {
-                g_themeNamesCache =
-                    SThemeNamesCache{THEME, SOURCE, readConfiguredThemeNames(), NOW};
-            }
-            return g_themeNamesCache->names;
+        const std::vector<std::string>& configuredThemeNames(SResolverState& state,
+                                                             const SConfig&  config) {
+            const auto KEY = std::pair{config.theme, config.source};
+            if (const auto IT = state.themeNames.find(KEY); IT != state.themeNames.end())
+                return IT->second;
+            return state.themeNames.emplace(KEY, readConfiguredThemeNames(config)).first->second;
         }
 
         std::string themeCacheKeyPart(const std::vector<std::string>& themes) {
@@ -700,22 +681,26 @@ namespace AppIconLookup {
             return key;
         }
 
-        std::optional<fs::path> findIconByTheme(const std::string& iconName, int sizePx,
-                                                const std::vector<std::string>& themes) {
+        std::optional<fs::path> findIconByTheme(SResolverState& state, const std::string& iconName,
+                                                int sizePx, const std::vector<std::string>& themes,
+                                                const std::stop_token& stop) {
             const auto LOOKUP_NAME = iconLookupName(iconName);
             for (const auto& themeName : themes) {
+                if (stop.stop_requested())
+                    return std::nullopt;
                 std::unordered_set<std::string> visited;
-                if (auto path = findIconInTheme(LOOKUP_NAME, themeName, sizePx, visited))
+                if (auto path = findIconInTheme(state, LOOKUP_NAME, themeName, sizePx, visited))
                     return path;
             }
 
             std::unordered_set<std::string> visited;
-            return findIconInTheme(LOOKUP_NAME, "hicolor", sizePx, visited);
+            return findIconInTheme(state, LOOKUP_NAME, "hicolor", sizePx, visited);
         }
 
-        const std::unordered_map<std::string, std::vector<fs::path>>& legacyIconIndex() {
-            if (g_legacyIconIndex)
-                return *g_legacyIconIndex;
+        const std::unordered_map<std::string, std::vector<fs::path>>*
+        legacyIconIndex(SResolverState& state, const std::stop_token& stop) {
+            if (state.legacyIconIndex)
+                return &*state.legacyIconIndex;
 
             std::unordered_map<std::string, std::vector<fs::path>> index;
             for (const auto& root : iconRoots()) {
@@ -724,19 +709,25 @@ namespace AppIconLookup {
                          it(root, fs::directory_options::skip_permission_denied, ec),
                      end;
                      it != end; it.increment(ec)) {
+                    if (stop.stop_requested())
+                        return nullptr;
                     if (ec || !hasImageExtension(it->path()) || !it->is_regular_file(ec))
                         continue;
                     index[it->path().stem().string()].push_back(it->path());
                 }
             }
-            g_legacyIconIndex = std::move(index);
-            return *g_legacyIconIndex;
+            state.legacyIconIndex = std::move(index);
+            return &*state.legacyIconIndex;
         }
 
-        std::optional<std::string> findIconByLegacySearch(const std::string& iconName, int sizePx) {
-            const auto& INDEX = legacyIconIndex();
-            const auto  MATCH = INDEX.find(iconLookupName(iconName));
-            if (MATCH == INDEX.end())
+        std::optional<std::string> findIconByLegacySearch(SResolverState&    state,
+                                                          const std::string& iconName, int sizePx,
+                                                          const std::stop_token& stop) {
+            const auto* index = legacyIconIndex(state, stop);
+            if (!index)
+                return std::nullopt;
+            const auto MATCH = index->find(iconLookupName(iconName));
+            if (MATCH == index->end())
                 return std::nullopt;
 
             std::optional<fs::path> bestPath;
@@ -755,40 +746,46 @@ namespace AppIconLookup {
             return bestPath ? std::optional<std::string>{bestPath->string()} : std::nullopt;
         }
 
-        std::optional<std::string> findIconPath(const std::string& iconName, int sizePx) {
+        std::optional<std::string> findIconPath(SResolverState& state, const std::string& iconName,
+                                                int sizePx, const SConfig& config,
+                                                const std::stop_token& stop) {
             if (iconName.empty())
                 return std::nullopt;
 
-            const auto& THEMES    = configuredThemeNames();
-            const auto  CACHE_KEY = iconName + ":" + std::to_string(sizePx) + ":" + g_config.theme +
-                ":" + g_config.source + ":" + themeCacheKeyPart(THEMES);
-            if (const auto IT = g_iconPathCache.find(CACHE_KEY); IT != g_iconPathCache.end())
+            auto&       cache     = state.iconPathCache;
+            const auto& THEMES    = configuredThemeNames(state, config);
+            const auto  CACHE_KEY = iconName + ":" + std::to_string(sizePx) + ":" + config.theme +
+                ":" + config.source + ":" + themeCacheKeyPart(THEMES);
+            if (const auto IT = cache.find(CACHE_KEY); IT != cache.end())
                 return IT->second;
 
             const fs::path  ICON(iconName);
             std::error_code ec;
             if (ICON.is_absolute() && fs::is_regular_file(ICON, ec)) {
-                g_iconPathCache.emplace(CACHE_KEY, ICON.string());
+                cache.emplace(CACHE_KEY, ICON.string());
                 return ICON.string();
             }
 
-            const auto THEME_RESULT = themeLookupDisabled() ?
+            const auto THEME_RESULT = themeLookupDisabled(config) ?
                 std::optional<fs::path>{} :
-                findIconByTheme(iconName, sizePx, THEMES);
-            const auto RESULT = THEME_RESULT ? std::optional<std::string>{THEME_RESULT->string()} :
-                                               findIconByLegacySearch(iconName, sizePx);
-            g_iconPathCache.emplace(CACHE_KEY, RESULT);
+                findIconByTheme(state, iconName, sizePx, THEMES, stop);
+            auto       RESULT = THEME_RESULT ? std::optional<std::string>{THEME_RESULT->string()} :
+                                               findIconByLegacySearch(state, iconName, sizePx, stop);
+            if (stop.stop_requested())
+                return std::nullopt;
+            cache.emplace(CACHE_KEY, RESULT);
             return RESULT;
         }
 
-        std::optional<std::string> iconOverrideForAppId(const std::string& appId) {
+        std::optional<std::string> iconOverrideForAppId(const std::string& appId,
+                                                        const SConfig&     config) {
             const auto KEY = lowercase(appId);
-            for (const auto& entry : splitList(g_config.overrides, ',')) {
+            for (const auto& entry : splitList(config.overrides, ',')) {
                 const auto EQUAL = entry.find('=');
                 if (EQUAL == std::string::npos)
                     continue;
 
-                if (lowercase(trim(entry.substr(0, EQUAL))) == KEY) {
+                if (Winview::trimmedLower(entry.substr(0, EQUAL)) == KEY) {
                     auto ICON = trim(entry.substr(EQUAL + 1));
                     if (!ICON.empty())
                         return ICON;
@@ -800,33 +797,50 @@ namespace AppIconLookup {
 
     }
 
-    std::optional<std::string> findAppIconPath(const std::vector<std::string>& appIds, int sizePx,
-                                               const SConfig& config) {
-        g_config = config;
+    struct CResolver::SState : SResolverState {};
+
+    CResolver::CResolver() : m_state(std::make_unique<SState>()) {}
+    CResolver::~CResolver() = default;
+
+    std::optional<std::string> CResolver::find(const std::vector<std::string>& appIds, int sizePx,
+                                               const SConfig& config, const std::stop_token& stop) {
+        auto& state = *m_state;
         for (const auto& appId : appIds) {
-            if (auto overrideIcon = iconOverrideForAppId(appId)) {
-                if (auto path = findIconPath(*overrideIcon, sizePx))
+            if (auto overrideIcon = iconOverrideForAppId(appId, config)) {
+                if (auto path = findIconPath(state, *overrideIcon, sizePx, config, stop))
                     return path;
             }
 
-            if (auto entry = findDesktopEntry(appId)) {
-                if (auto path = findIconPath(entry->icon, sizePx))
+            if (auto entry = findDesktopEntry(state, appId, stop)) {
+                if (auto path = findIconPath(state, entry->icon, sizePx, config, stop))
                     return path;
             }
 
-            if (auto path = findIconPath(appId, sizePx))
+            if (auto path = findIconPath(state, appId, sizePx, config, stop))
                 return path;
+            if (stop.stop_requested())
+                return std::nullopt;
         }
 
         return std::nullopt;
     }
 
-    void clearCache() {
-        g_iconPathCache.clear();
-        g_iconThemeCache.clear();
-        g_desktopEntryCache.clear();
-        g_desktopEntries.reset();
-        g_legacyIconIndex.reset();
-        g_themeNamesCache.reset();
+    bool CResolver::refreshThemes() {
+        bool changed = false;
+        for (auto& [key, names] : m_state->themeNames) {
+            auto current = readConfiguredThemeNames(
+                {.theme = key.first, .source = key.second, .overrides = ""});
+            if (current != names) {
+                names   = std::move(current);
+                changed = true;
+            }
+        }
+        if (changed)
+            m_state->iconPathCache.clear();
+        return changed;
+    }
+
+    void CResolver::clear() {
+        *m_state = {};
     }
 }

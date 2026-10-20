@@ -90,6 +90,7 @@ class HTLayoutBase {
     std::pair<int, int> get_current_ws_xy();
     CBox                get_global_window_box(PHLWINDOW window, WORKSPACEID workspace_id);
     CBox                get_global_ws_box(WORKSPACEID workspace_id);
+    CBox                layout_box(WORKSPACEID workspace_id) const;
 
     Vector2D            global_to_local_ws_scaled(Vector2D pos, WORKSPACEID workspace_id);
     Vector2D            global_to_local_ws_unscaled(Vector2D pos, WORKSPACEID workspace_id);

@@ -72,7 +72,11 @@ namespace {
 // Note: box is relative to (0, 0), not monitor
 void render_window_at_box(PHLWINDOW window, PHLMONITOR monitor, const Time::steady_tp& time,
                           CBox box, float alpha) {
-    if (!window || !monitor)
+    if (!window || !window->m_isMapped || !monitor || box.empty())
+        return;
+
+    const auto window_size = window->sizeAnimation()->value();
+    if (window_size.x <= 0 || window_size.y <= 0)
         return;
 
     box.x -= monitor->m_position.x;
@@ -80,7 +84,7 @@ void render_window_at_box(PHLWINDOW window, PHLMONITOR monitor, const Time::stea
 
     // ignorePosition draws the window at the monitor origin, sidestepping the workspace
     // render offset that stays non-zero for slid-out workspaces.
-    const float    scale     = box.w / window->sizeAnimation()->value().x;
+    const float    scale     = box.w / window_size.x;
     const Vector2D transform = (box.pos() / scale - window->m_floatingOffset) * monitor->m_scale;
 
     const CBox     clip = CBox{box.pos(), box.size()}.scale(monitor->m_scale).round();
@@ -104,6 +108,10 @@ void render_workspace_at_box(PHLMONITOR monitor, PHLWORKSPACE workspace,
                              const Time::steady_tp& time, CBox box) {
     if (!monitor)
         return;
+    // A stale slot can name a workspace another monitor now owns; swapping it in here
+    // would rewrite that monitor's live workspace state.
+    if (workspace != nullptr && workspace->m_monitor != monitor)
+        workspace = nullptr;
 
     // renderWorkspace derives scale = box.w / pixelSize and translate = box.pos, and
     // applies the translate BEFORE the scale, so pre-divide the position by the scale.

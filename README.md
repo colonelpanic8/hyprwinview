@@ -60,6 +60,13 @@ default. Use `hyprpm --no-nix add ...` only when the system environment already
 provides Hyprland headers and the build dependencies listed in
 `CMakeLists.txt`.
 
+Version 0.2.1 includes both overview modes. The `hyprpm` compatibility pins
+for Hyprland v0.56.0 and v0.56.2 both select this release's implementation.
+See [the changelog](CHANGELOG.md) for release fixes.
+
+Workspace grid rows, columns, and layers are each limited to 1–32, bounding
+allocation to 32,768 slots per monitor.
+
 ## Hyprland Lua Config
 
 Load the plugin:
@@ -177,6 +184,10 @@ hl.plugin.hyprwinview.configure({
 })
 ```
 
+Lua argument tables reject unknown fields, invalid types, and conflicting aliases.
+Key overrides reset on a successful configuration reload; a syntax error keeps
+the previous overrides. Unspecified key sets use their scalar `keys_*` settings.
+
 Keyboard key sets are Lua arrays when configuring through
 `hl.plugin.hyprwinview.configure`. Modifiers can be written with `+`, for
 example `shift+return` or `shift + b`. Modifier matching is exact for Shift,
@@ -232,7 +243,7 @@ App icons are resolved through freedesktop icon themes before falling back to a
 plain filesystem search. The worker indexes fallback directories once, sharing
 the index across applications and icon sizes. GTK/Qt theme settings are checked
 at most once per second; explicit plugin theme changes queue new lookups
-immediately. Setting `show_app_icon = 0` stops queuing warmup work.
+immediately. Cached lookup misses are cleared by `hyprctl reload`. Setting `show_app_icon = 0` stops queuing warmup work.
 
 `app_icon_theme_source` accepts `auto`, `gtk`, `qt`,
 `none`, or `legacy`; `auto` reads GTK settings and Qt/KDE settings, preferring

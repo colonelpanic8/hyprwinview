@@ -1,16 +1,13 @@
 #include "app_icon_lookup.hpp"
 
-#include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
-#include <thread>
 
 namespace fs = std::filesystem;
 using AppIconLookup::SConfig;
-using AppIconLookup::findAppIconPath;
 
 static void writeFile(const fs::path& path, const std::string& contents = "") {
     fs::create_directories(path.parent_path());
@@ -41,6 +38,12 @@ int main(int argc, char** argv) {
     setenv("XDG_CONFIG_HOME", CONFIG.c_str(), 1);
     setenv("XDG_CURRENT_DESKTOP", "", 1);
     setenv("QT_QPA_PLATFORMTHEME", "", 1);
+
+    AppIconLookup::CResolver resolver;
+    const auto findAppIconPath = [&](const std::vector<std::string>& appIds, int sizePx,
+                                     const SConfig& config) {
+        return resolver.find(appIds, sizePx, config);
+    };
 
     const std::string INDEX =
         "[Icon Theme]\nDirectories=16x16/apps,48x48/apps,96x96/apps,scalable/apps\n"
@@ -81,7 +84,7 @@ int main(int argc, char** argv) {
     writeFile(DATA / "pixmaps/other.SVG");
     fs::create_symlink(DATA / "pixmaps/other.SVG", DATA / "pixmaps/linked.svg");
     const SConfig FALLBACK{.theme = "", .source = "legacy", .overrides = ""};
-    AppIconLookup::clearCache();
+    resolver.clear();
     expectPath(findAppIconPath({"legacy"}, 32, FALLBACK), LEGACY / "32x32/apps/legacy.png");
     expectPath(findAppIconPath({"legacy.png"}, 48, FALLBACK), LEGACY / "64x64/apps/legacy.png");
     expectPath(findAppIconPath({"scaled"}, 96, FALLBACK), LEGACY / "48x48@2/apps/scaled.png");
@@ -90,12 +93,12 @@ int main(int argc, char** argv) {
     expectMissing(findAppIconPath({"late"}, 48, FALLBACK));
     writeFile(DATA / "pixmaps/late.svg");
     expectMissing(findAppIconPath({"late"}, 48, FALLBACK));
-    AppIconLookup::clearCache();
+    resolver.clear();
     expectPath(findAppIconPath({"late"}, 48, FALLBACK), DATA / "pixmaps/late.svg");
 
     writeFile(DATA / "applications/editor.desktop",
               "[Desktop Entry]\nIcon=tie\nStartupWMClass=EditorClass\n");
-    AppIconLookup::clearCache();
+    resolver.clear();
     expectPath(findAppIconPath({"editor"}, 48, THEMED), THEME / "48x48/apps/tie.svg");
     expectPath(findAppIconPath({"EditorClass"}, 48, THEMED), THEME / "48x48/apps/tie.svg");
     expectPath(findAppIconPath({"unknown", "editor"}, 48, THEMED), THEME / "48x48/apps/tie.svg");
@@ -106,20 +109,28 @@ int main(int argc, char** argv) {
                    {.theme = "", .overrides = "editor=" + (DATA / "pixmaps/other.SVG").string()}),
                DATA / "pixmaps/other.SVG");
 
+    writeFile(DATA / "applications/nested/scanned.desktop",
+              "[Desktop Entry]\nIcon=late\nStartupWMClass=ScannedClass\n");
+    resolver.clear();
+    std::stop_source stopped;
+    stopped.request_stop();
+    expectMissing(resolver.find({"ScannedClass"}, 48, FALLBACK, stopped.get_token()));
+    expectPath(findAppIconPath({"ScannedClass"}, 48, FALLBACK), DATA / "pixmaps/late.svg");
+
     writeFile(CONFIG / "gtk-3.0/settings.ini", "[Settings]\ngtk-icon-theme-name=test\n");
-    AppIconLookup::clearCache();
+    resolver.clear();
     expectPath(findAppIconPath({"tie"}, 48, {.theme = "", .source = "gtk", .overrides = ""}),
                THEME / "48x48/apps/tie.svg");
     writeFile(CONFIG / "gtk-3.0/settings.ini", "[Settings]\ngtk-icon-theme-name=child\n");
     writeFile(DATA / "icons/child/48x48/apps/tie.svg");
     expectPath(findAppIconPath({"tie"}, 48, {.theme = "", .source = "gtk", .overrides = ""}),
                THEME / "48x48/apps/tie.svg");
-    std::this_thread::sleep_for(std::chrono::milliseconds(1100));
+    if (!resolver.refreshThemes() || resolver.refreshThemes())
+        throw std::runtime_error("theme refresh did not report exactly one change");
     expectPath(findAppIconPath({"tie"}, 48, {.theme = "", .source = "gtk", .overrides = ""}),
                DATA / "icons/child/48x48/apps/tie.svg");
     expectPath(findAppIconPath({"tie"}, 48, THEMED), THEME / "48x48/apps/tie.svg");
     expectPath(findAppIconPath({"tie"}, 48, {.theme = "", .source = "gtk", .overrides = ""}),
                DATA / "icons/child/48x48/apps/tie.svg");
-    AppIconLookup::clearCache();
     std::cout << "Icon lookup tests passed\n";
 }

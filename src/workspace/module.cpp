@@ -31,23 +31,29 @@
 #include "config/ConfigManager.hpp"
 #include "globals.hpp"
 #include "layout/grid.hpp"
+#include "layer.hpp"
 #include "overview.hpp"
 #include "types.hpp"
+#include "../overview.hpp"
+#include "../lua_args.hpp"
 
 using namespace Config::Actions;
 using namespace Config::Values;
 
 static std::vector<CHyprSignalListener> callbackListeners;
 
-#define DISPATCHER(name)                                                                           \
-    static SDispatchResult dispatch_##name(std::string arg);                                       \
-    static int             lua_##name(lua_State* L) {                                              \
-        const auto RESULT = dispatch_##name(luaL_optstring(L, 1, ""));                 \
-        if (!RESULT.success)                                                           \
-            return luaL_error(L, "%s", RESULT.error.c_str());                          \
-        return 0;                                                                      \
-    }                                                                                              \
-    static SDispatchResult dispatch_##name(std::string arg)
+#define DISPATCHER(name)                                                                                   \
+    static SDispatchResult dispatch_##name(std::string arg);                                               \
+    static int             lua_##name(lua_State* L) {                                                      \
+        const char* arg = luaL_optstring(L, 1, "");                                            \
+        return Winview::luaBoundary(L, [arg](lua_State*) -> std::expected<void, std::string> { \
+            const auto result = dispatch_##name(arg);                                          \
+            if (!result.success)                                                               \
+                return std::unexpected(result.error);                                          \
+            return {};                                                                         \
+        });                                                                                    \
+    }                                                                                                      \
+    static SDispatchResult dispatch_##name([[maybe_unused]] std::string arg)
 
 static SDispatchResult dispatch(std::string arg) {
     const auto DISPATCHSTR = arg.substr(0, arg.find_first_of(' '));
@@ -110,14 +116,16 @@ static void set_layer(PHTVIEW view, int new_layer) {
     //   dispatch hyprtasking:toggle cursor'
     if (view->closing)
         return;
+    const PHLMONITOR monitor = view->get_monitor();
     Log::logger->log(LOG, "[Hyprtasking] View \"{}\", previous layer: {}, new: {}",
-                     view->get_monitor()->m_name, view->layout->layer, new_layer);
+                     monitor == nullptr ? "?" : monitor->m_name, view->layout->layer, new_layer);
     view->layout->layer = new_layer;
 }
 
 static SDispatchResult change_layer(std::string arg, bool move_window) {
     if (ht_manager == nullptr)
         return {.success = false, .error = "ht_manager is null"};
+    ht_manager->refresh_grid_caches_if_dirty();
 
     const PHTVIEW cursor_view = ht_manager->get_view_from_cursor();
     if (cursor_view == nullptr)
@@ -126,22 +134,16 @@ static SDispatchResult change_layer(std::string arg, bool move_window) {
     if (cursor_view->layout->layout_name() != "grid")
         return {.success = false, .error = "layers are only supported in grid layout"};
 
-    const int LAYERS         = HTConfig::value<Config::INTEGER>("grid:layers");
-    const int LOOP_LAYERS    = HTConfig::value<Config::INTEGER>("grid:loop_layers");
-    const int original_layer = cursor_view->layout->layer;
+    const int  LAYERS         = HTConfig::positive_int("grid:layers");
+    const int  LOOP_LAYERS    = HTConfig::value<Config::INTEGER>("grid:loop_layers");
+    const int  original_layer = cursor_view->layout->layer;
 
-    int       resulting_layer = original_layer;
-    if (arg[0] == '+' || arg[0] == '-') {
-        resulting_layer += std::stoi(arg);
-    } else {
-        resulting_layer = std::stoi(arg);
-    }
-
-    if (resulting_layer < 0 || resulting_layer >= LAYERS) {
-        if (!LOOP_LAYERS)
-            return {};
-        resulting_layer = ((resulting_layer % LAYERS) + LAYERS) % LAYERS;
-    }
+    const auto target_layer = HT::targetLayer(arg, original_layer, LAYERS, LOOP_LAYERS != 0);
+    if (!target_layer)
+        return {.success = false, .error = target_layer.error()};
+    if (*target_layer < 0 || *target_layer >= LAYERS)
+        return {};
+    const int        resulting_layer = static_cast<int>(*target_layer);
 
     const PHLMONITOR monitor = cursor_view->get_monitor();
     if (monitor == nullptr)
@@ -265,7 +267,9 @@ static void hook_render_workspace(void* thisptr, PHLMONITOR monitor, PHLWORKSPAC
         return;
     }
     const PHTVIEW view = ht_manager->get_view_from_monitor(monitor);
-    if ((view != nullptr && view->navigating) || ht_manager->has_active_view()) {
+    if (view != nullptr && (view->navigating || ht_manager->has_active_view())) {
+        // Moving workspaces between monitors mid-frame is unsafe; rules are enforced on show.
+        ht_manager->refresh_grid_caches_if_dirty(false);
         view->layout->render();
     } else {
         ((render_workspace_t)(render_workspace_hook->m_original))(thisptr, monitor, workspace, now,
@@ -410,16 +414,18 @@ static bool hook_should_render_window(void* thisptr, PHLWINDOW window, PHLMONITO
     return view->layout->should_render_window(window);
 }
 
+// isSolitaryBlocked is a CMonitor member, and a solitary client also enables direct
+// scanout; either one skips renderWorkspace and RENDER_LAST_MOMENT for that monitor.
 static uint32_t hook_is_solitary_blocked(void* thisptr, bool full) {
-    // No manager/view for the cursor monitor (e.g. during teardown): defer to
-    // Hyprland. Falling through here would dereference a null view.
-    PHTVIEW view = ht_manager == nullptr ? nullptr : ht_manager->get_view_from_cursor();
-    if (view == nullptr)
-        return (*(origIsSolitaryBlocked)is_solitary_blocked_hook->m_original)(thisptr, full);
-
-    if (view->active || view->navigating) {
+    const PHLMONITOR monitor = static_cast<Monitor::CMonitor*>(thisptr)->m_self.lock();
+    if (monitor != nullptr && g_pWindowOverview != nullptr &&
+        g_pWindowOverview->pMonitor == monitor)
         return Monitor::CMonitor::SC_UNKNOWN;
-    }
+
+    const PHTVIEW view =
+        ht_manager == nullptr ? nullptr : ht_manager->get_view_from_monitor(monitor);
+    if (view != nullptr && (view->active || view->navigating))
+        return Monitor::CMonitor::SC_UNKNOWN;
     return (*(origIsSolitaryBlocked)is_solitary_blocked_hook->m_original)(thisptr, full);
 }
 
@@ -451,7 +457,7 @@ static void on_key(IKeyboard::SKeyEvent e, Event::SCallbackInfo& info) {
     info.cancelled = ht_manager->on_key(e);
 }
 
-static void on_mouse_move(Vector2D c, Event::SCallbackInfo& info) {
+static void on_mouse_move(Vector2D, Event::SCallbackInfo& info) {
     if (ht_manager == nullptr)
         return;
     info.cancelled = ht_manager->on_mouse_move();
@@ -463,7 +469,7 @@ static void on_mouse_axis(IPointer::SAxisEvent e, Event::SCallbackInfo& info) {
     info.cancelled = ht_manager->on_mouse_axis(e.delta);
 }
 
-static void on_swipe_begin(IPointer::SSwipeBeginEvent e, Event::SCallbackInfo& info) {
+static void on_swipe_begin(IPointer::SSwipeBeginEvent, Event::SCallbackInfo&) {
     if (ht_manager == nullptr)
         return;
     ht_manager->swipe_start();
@@ -475,7 +481,7 @@ static void on_swipe_update(IPointer::SSwipeUpdateEvent e, Event::SCallbackInfo&
     info.cancelled = ht_manager->swipe_update(e);
 }
 
-static void on_swipe_end(IPointer::SSwipeEndEvent e, Event::SCallbackInfo& info) {
+static void on_swipe_end(IPointer::SSwipeEndEvent, Event::SCallbackInfo& info) {
     if (ht_manager == nullptr)
         return;
     info.cancelled = ht_manager->swipe_end();
@@ -488,31 +494,22 @@ static void cancel_event(Event::SCallbackInfo& info) {
 }
 
 static void register_monitors() {
-    if (ht_manager == nullptr)
-        return;
-    for (const PHLMONITOR& monitor : State::monitorState()->monitors()) {
-        // Skip monitors that haven't finished initializing
-        if (monitor->m_transformedSize.x < 1 || monitor->m_transformedSize.y < 1)
-            continue;
+    if (ht_manager != nullptr)
+        ht_manager->register_monitors();
+}
 
-        const PHTVIEW view = ht_manager->get_view_from_monitor(monitor);
-        if (view != nullptr) {
-            if (!view->active)
-                view->layout->init_position();
-            continue;
-        }
-        ht_manager->views.push_back(makeShared<HTView>(monitor->m_id));
-
-        Log::logger->log(LOG, "[Hyprtasking] Registering view for monitor {} with resolution {}x{}",
-                         monitor->m_description, monitor->m_transformedSize.x,
-                         monitor->m_transformedSize.y);
-    }
-    ht_manager->refresh_all_grid_caches();
+static void mark_grid_caches_dirty() {
+    if (ht_manager != nullptr)
+        ht_manager->mark_grid_caches_dirty();
 }
 
 static void on_monitor_removed(PHLMONITOR monitor) {
     if (ht_manager == nullptr || monitor == nullptr)
         return;
+    // The cursor override, drag mode and swipe/jump state are shared by every view.
+    const PHTVIEW view = ht_manager->get_view_from_id(monitor->m_id);
+    if (view != nullptr && (view->active || view->closing || view->navigating))
+        ht_manager->hide_all_views_immediately();
     ht_manager->remove_view_for_monitor_id(monitor->m_id);
     ht_manager->refresh_all_grid_caches();
 }
@@ -522,19 +519,25 @@ static void on_config_reloaded() {
         return;
 
     // re-init scale and offset for inactive views, change layout if changed
+    const Config::STRING new_layout = HTConfig::value<Config::STRING>("layout");
     for (PHTVIEW& view : ht_manager->views) {
         if (view == nullptr)
             continue;
-        const Config::STRING new_layout = HTConfig::value<Config::STRING>("layout");
-        if (HTConfig::value<Config::INTEGER>("close_overview_on_reload") ||
-            view->layout->layout_name() != new_layout) {
+        if (view->layout->layout_name() != new_layout) {
+            // The old layout's animation variables, and the hide callback they would carry,
+            // are destroyed with it, so close without animating.
+            Log::logger->log(LOG, "[Hyprtasking] Changing overview layout on config reload");
+            view->hideImmediately();
+            view->change_layout(new_layout);
+        } else if (HTConfig::value<Config::INTEGER>("close_overview_on_reload") && view->active &&
+                   !view->closing) {
             Log::logger->log(LOG, "[Hyprtasking] Closing overview on config reload");
             view->hide(false);
-            view->change_layout(new_layout);
         }
     }
 
-    ht_manager->refresh_all_grid_caches();
+    // Also picks up monitors that were still unsized when monitor.added fired.
+    ht_manager->register_monitors();
 }
 
 static void init_functions() {
@@ -661,6 +664,16 @@ static void register_callbacks() {
     callbackListeners.push_back(Event::bus()->m_events.config.reloaded.listen(on_config_reloaded));
     callbackListeners.push_back(Event::bus()->m_events.monitor.added.listen(register_monitors));
     callbackListeners.push_back(Event::bus()->m_events.monitor.removed.listen(on_monitor_removed));
+    callbackListeners.push_back(
+        Event::bus()->m_events.monitor.layoutChanged.listen(register_monitors));
+
+    // Synthetic slot IDs must not alias workspaces that appear on, or move to, other monitors.
+    callbackListeners.push_back(Event::bus()->m_events.workspace.created.listen(
+        [](PHLWORKSPACEREF) { mark_grid_caches_dirty(); }));
+    callbackListeners.push_back(Event::bus()->m_events.workspace.removed.listen(
+        [](PHLWORKSPACEREF) { mark_grid_caches_dirty(); }));
+    callbackListeners.push_back(Event::bus()->m_events.workspace.moveToMonitor.listen(
+        [](PHLWORKSPACE, PHLMONITOR) { mark_grid_caches_dirty(); }));
 }
 
 // every dispatcher funciton must have DISPATCHER(name) this to work
@@ -673,10 +686,12 @@ static void register_callbacks() {
 static int lua_is_active(lua_State* L) {
     if (ht_manager == nullptr)
         return luaL_error(L, "%s", "ht_manager is null");
-    PHTVIEW cursor_view = ht_manager->get_view_from_cursor();
-    if (cursor_view == nullptr)
+    std::optional<bool> active;
+    if (const PHTVIEW cursor_view = ht_manager->get_view_from_cursor(); cursor_view != nullptr)
+        active = cursor_view->active;
+    if (!active.has_value())
         return luaL_error(L, "%s", "cursor_view is null");
-    lua_pushboolean(L, cursor_view->active);
+    lua_pushboolean(L, *active);
     return 1;
 }
 
@@ -692,11 +707,11 @@ static void add_dispatchers() {
     HyprlandAPI::addLuaFunction(PHANDLE, "hyprtasking", "is_active", lua_is_active);
 }
 
-#define addConfigValue(T, config, descr, value)                                                    \
+#define addConfigValue(T, config, descr, value, ...)                                               \
     do {                                                                                           \
-        SP<Config::Values::IValue> ivalue =                                                        \
-            makeShared<T>("plugin:hyprtasking:" config, (descr), (value));                         \
-        const auto RET = Config::mgr()->registerPluginValue(PHANDLE, ivalue);                      \
+        SP<Config::Values::IValue> ivalue = makeShared<T>("plugin:hyprtasking:" config, (descr),   \
+                                                          (value)__VA_OPT__(, ) __VA_ARGS__);      \
+        const auto                 RET    = Config::mgr()->registerPluginValue(PHANDLE, ivalue);   \
         if (!RET) {                                                                                \
             Log::logger->log(ERR, "[Hyprtasking] could not register value \"{}\"",                 \
                              ivalue->name());                                                      \
@@ -727,15 +742,20 @@ static void init_config() {
     // swipe
     addConfigValue(CIntValue, "gestures:enabled", "enabled", 1);
     addConfigValue(CIntValue, "gestures:move_fingers", "move fingers", 3);
-    addConfigValue(CFloatValue, "gestures:move_distance", "move distance", 300.0);
+    addConfigValue(CFloatValue, "gestures:move_distance", "move distance", 300.0,
+                   SFloatValueOptions{.min = 1.F});
     addConfigValue(CIntValue, "gestures:open_fingers", "open fingers", 4);
-    addConfigValue(CFloatValue, "gestures:open_distance", "open distance", 300.0);
+    addConfigValue(CFloatValue, "gestures:open_distance", "open distance", 300.0,
+                   SFloatValueOptions{.min = 1.F});
     addConfigValue(CIntValue, "gestures:open_positive", "open positive", 1);
 
     // grid specific
-    addConfigValue(CIntValue, "grid:rows", "rows", 3);
-    addConfigValue(CIntValue, "grid:cols", "cols", 3);
-    addConfigValue(CIntValue, "grid:layers", "layers", 1);
+    addConfigValue(CIntValue, "grid:rows", "rows", 3,
+                   SIntValueOptions{.min = 1, .max = HT::MAX_GRID_DIMENSION});
+    addConfigValue(CIntValue, "grid:cols", "cols", 3,
+                   SIntValueOptions{.min = 1, .max = HT::MAX_GRID_DIMENSION});
+    addConfigValue(CIntValue, "grid:layers", "layers", 1,
+                   SIntValueOptions{.min = 1, .max = HT::MAX_GRID_DIMENSION});
     addConfigValue(CIntValue, "grid:loop_layers", "loop layers", 1);
     addConfigValue(CIntValue, "grid:loop", "loop", 0);
     addConfigValue(CIntValue, "grid:gaps_use_aspect_ratio", "gaps use aspect ratio", 0);

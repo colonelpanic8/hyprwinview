@@ -15,6 +15,7 @@
 #include <hyprland/src/state/WorkspaceState.hpp>
 
 #include "config/shared/workspace/WorkspaceRuleManager.hpp"
+#include "globals.hpp"
 #include "layout/grid.hpp"
 #include "overview.hpp"
 
@@ -58,8 +59,10 @@ PHLWINDOW HTManager::get_window_from_cursor(bool return_focused) {
     if (cursor_monitor == nullptr)
         return nullptr;
 
-    if (return_focused)
-        return cursor_monitor->m_activeWorkspace->getLastFocusedWindow();
+    if (return_focused) {
+        const PHLWORKSPACE active_workspace = cursor_monitor->m_activeWorkspace;
+        return active_workspace == nullptr ? nullptr : active_workspace->getLastFocusedWindow();
+    }
 
     const PHTVIEW cursor_view = get_view_from_monitor(cursor_monitor);
     if (cursor_view == nullptr)
@@ -83,7 +86,9 @@ PHLWINDOW HTManager::get_window_from_cursor(bool return_focused) {
         cursor_view->layout->global_to_local_ws_unscaled(mouse_coords, ws_id) +
         cursor_monitor->m_position;
 
-    const PHLWORKSPACEREF o_workspace = cursor_monitor->m_activeWorkspace;
+    // Strong ref: the monitor is the only owner of an empty active workspace, so a weak ref
+    // could expire during the temporary switch below.
+    const PHLWORKSPACE o_workspace = cursor_monitor->m_activeWorkspace;
     cursor_monitor->changeWorkspace(hovered_workspace, true);
 
     const PHLWINDOW hovered_window = Desktop::viewState()->hitTest().windowAt(
@@ -92,12 +97,13 @@ PHLWINDOW HTManager::get_window_from_cursor(bool return_focused) {
             Desktop::View::ALLOW_FLOATING);
 
     if (o_workspace != nullptr)
-        cursor_monitor->changeWorkspace(o_workspace.lock(), true);
+        cursor_monitor->changeWorkspace(o_workspace, true);
 
     return hovered_window;
 }
 
 void HTManager::show_all_views() {
+    register_monitors();
     for (PHTVIEW view : views) {
         if (view == nullptr)
             continue;
@@ -107,7 +113,7 @@ void HTManager::show_all_views() {
 
 void HTManager::hide_all_views() {
     for (PHTVIEW view : views) {
-        if (view == nullptr)
+        if (view == nullptr || !view->active)
             continue;
         view->hide(false);
     }
@@ -126,7 +132,12 @@ void HTManager::hide_all_views_immediately() {
 }
 
 void HTManager::show_cursor_view() {
-    const PHTVIEW view = get_view_from_cursor();
+    PHTVIEW view = get_view_from_cursor();
+    if (view == nullptr) {
+        // The monitor may have been unsized when monitor.added fired.
+        register_monitors();
+        view = get_view_from_cursor();
+    }
     if (view != nullptr)
         view->show();
 }
@@ -135,29 +146,63 @@ void HTManager::reset() {
     swipe_state = HT_SWIPE_NONE;
     swipe_amt   = 0.0;
     jump_pressed_keys.clear();
+    jump_label_textures.clear();
+    grid_caches_dirty = false;
     views.clear();
 }
 
-void HTManager::refresh_all_grid_caches() {
+void HTManager::register_monitors() {
+    for (const PHLMONITOR& monitor : State::monitorState()->monitors()) {
+        // Skip monitors that haven't finished initializing
+        if (monitor == nullptr || monitor->m_transformedSize.x < 1 ||
+            monitor->m_transformedSize.y < 1)
+            continue;
+
+        const PHTVIEW view = get_view_from_monitor(monitor);
+        if (view != nullptr) {
+            if (!view->active)
+                view->layout->init_position();
+            continue;
+        }
+        views.push_back(makeShared<HTView>(monitor->m_id));
+
+        Log::logger->log(LOG, "[Hyprtasking] Registering view for monitor {} with resolution {}x{}",
+                         monitor->m_description, monitor->m_transformedSize.x,
+                         monitor->m_transformedSize.y);
+    }
+    refresh_all_grid_caches();
+}
+
+void HTManager::mark_grid_caches_dirty() {
+    grid_caches_dirty = true;
+}
+
+void HTManager::refresh_grid_caches_if_dirty(bool enforce_rules) {
+    if (grid_caches_dirty)
+        refresh_all_grid_caches(enforce_rules);
+}
+
+void HTManager::refresh_all_grid_caches(bool enforce_rules) {
     // Enforce monitor-binding rules globally first. Per-grid refresh below
     // sees one workspace at a time on one monitor; if a rule-bound ws still
     // lives on the wrong monitor, the first grid to refresh would claim it
     // via Pass 2 and the rule-bound grid would then skip it via off_limits,
     // so the migration would never happen.
-    const auto& all_rules = Config::workspaceRuleMgr()->getAllWorkspaceRules();
-    for (const auto& rule : all_rules) {
-        if (rule->m_workspaceId <= 0)
-            continue;
-        const auto bound = Config::workspaceRuleMgr()->getBoundMonitorForWS(
-            rule->m_workspaceName.starts_with("name:") ? rule->m_workspaceName.substr(5) :
-                                                         rule->m_workspaceName);
-        if (bound == nullptr)
-            continue;
-        const PHLWORKSPACE ws = State::workspaceState()->query().id(rule->m_workspaceId).run();
-        if (ws == nullptr)
-            continue;
-        if (ws->m_monitor.lock() != bound)
-            State::workspacePlacementController()->moveWorkspaceToMonitor(ws, bound);
+    if (enforce_rules) {
+        for (const auto& rule : Config::workspaceRuleMgr()->getAllWorkspaceRules()) {
+            if (rule->m_workspaceId <= 0)
+                continue;
+            const auto bound = Config::workspaceRuleMgr()->getBoundMonitorForWS(
+                rule->m_workspaceName.starts_with("name:") ? rule->m_workspaceName.substr(5) :
+                                                             rule->m_workspaceName);
+            if (bound == nullptr)
+                continue;
+            const PHLWORKSPACE ws = State::workspaceState()->query().id(rule->m_workspaceId).run();
+            if (ws == nullptr)
+                continue;
+            if (ws->m_monitor.lock() != bound)
+                State::workspacePlacementController()->moveWorkspaceToMonitor(ws, bound);
+        }
     }
 
     std::vector<HTLayoutGrid*> grids;
@@ -188,10 +233,13 @@ void HTManager::refresh_all_grid_caches() {
     for (PHTVIEW view : views) {
         if (view == nullptr || view->layout == nullptr)
             continue;
-        if (view->active)
+        if (view->active || view->navigating)
             continue;
         view->layout->init_position();
     }
+
+    // Workspace moves made above have been folded into the caches.
+    grid_caches_dirty = false;
 }
 
 void HTManager::remove_view_for_monitor_id(MONITORID mid) {

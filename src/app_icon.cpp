@@ -16,7 +16,6 @@
 #include <cairo/cairo.h>
 
 #include <algorithm>
-#include <chrono>
 #include <cmath>
 #include <memory>
 #include <string>
@@ -24,31 +23,26 @@
 #include <vector>
 
 #include "app_icon_loader.hpp"
+#include "settings.hpp"
 
 namespace {
     struct STextureCacheEntry {
-        SP<Render::ITexture> texture;
-        std::string          path;
-        int                  sizePx = 0;
+        std::weak_ptr<const AppIconLoader::SLoadedIcon> icon;
+        SP<Render::ITexture>                            texture;
     };
 
-    std::unordered_map<std::string, STextureCacheEntry> g_textureCache;
-    std::unique_ptr<AppIconLoader::CLoader>             g_loader;
-    SP<CEventLoopTimer>                                 g_warmTimer;
-    std::vector<CHyprSignalListener>                    g_warmListeners;
+    std::unordered_map<const AppIconLoader::SLoadedIcon*, STextureCacheEntry> g_textureCache;
+    std::unique_ptr<AppIconLoader::CLoader>                                   g_loader;
+    UP<SEventLoopDoLaterLock>                                                 g_initialWarm;
+    std::vector<CHyprSignalListener>                                          g_warmListeners;
 
-    AppIconLookup::SConfig                              iconConfig() {
-        static const CConfigValue<Config::STRING> THEME("plugin:hyprwinview:app_icon_theme");
-        static const CConfigValue<Config::STRING> SOURCE(
-            "plugin:hyprwinview:app_icon_theme_source");
-        static const CConfigValue<Config::STRING> OVERRIDES(
-            "plugin:hyprwinview:app_icon_overrides");
-        return {*THEME, *SOURCE, *OVERRIDES};
+    AppIconLookup::SConfig                                                    iconConfig() {
+        using namespace WinviewConfig;
+        return {*PAPPICONTHEME(), *PAPPICONTHEMESOURCE(), *PAPPICONOVERRIDES()};
     }
 
     bool iconsEnabled() {
-        static const CConfigValue<Config::INTEGER> SHOW("plugin:hyprwinview:show_app_icon");
-        return *SHOW != 0;
+        return *WinviewConfig::PSHOWAPPICON() != 0;
     }
 
     AppIconLoader::CLoader& loader() {
@@ -60,13 +54,14 @@ namespace {
     SP<Render::ITexture> textureForIcon(const AppIconLoader::Icon& icon) {
         if (!icon)
             return nullptr;
-        const auto KEY = icon->path + ":" + std::to_string(icon->sizePx);
-        if (const auto IT = g_textureCache.find(KEY); IT != g_textureCache.end())
+        if (const auto IT = g_textureCache.find(icon.get());
+            IT != g_textureCache.end() && IT->second.icon.lock() == icon)
             return IT->second.texture;
 
+        std::erase_if(g_textureCache,
+                      [](const auto& entry) { return entry.second.icon.expired(); });
         auto texture = g_pHyprRenderer->createTexture(icon->surface.get());
-        if (texture)
-            g_textureCache.emplace(KEY, STextureCacheEntry{texture, icon->path, icon->sizePx});
+        g_textureCache.insert_or_assign(icon.get(), STextureCacheEntry{icon, texture});
         return texture;
     }
 
@@ -89,15 +84,9 @@ namespace {
         const auto IDS = appIdsForWindow(window);
         if (IDS.empty())
             return;
-        static const CConfigValue<Config::INTEGER> SIZE("plugin:hyprwinview:app_icon_size");
-        const auto                                 CONFIG = iconConfig();
-        for (const auto& monitor : State::monitorState()->monitors()) {
-            const int PIXELS =
-                std::max(1,
-                         (int)std::round(static_cast<double>(std::max<Config::INTEGER>(1, *SIZE)) *
-                                         monitor->m_scale));
-            loader().request({IDS, PIXELS, CONFIG});
-        }
+        const auto CONFIG = iconConfig();
+        for (const auto& monitor : State::monitorState()->monitors())
+            loader().request({IDS, appIconPixelSize(monitor->m_scale), CONFIG});
     }
 
     void warmWindows() {
@@ -108,19 +97,16 @@ namespace {
     }
 }
 
+int appIconPixelSize(double monitorScale) {
+    const auto SIZE = std::max<Config::INTEGER>(1, *WinviewConfig::PAPPICONSIZE());
+    return std::max(1, (int)std::round(static_cast<double>(SIZE) * monitorScale));
+}
+
 void initializeAppIconCache() {
     g_warmListeners.push_back(Event::bus()->m_events.window.open.listen(warmWindow));
     g_warmListeners.push_back(Event::bus()->m_events.window.class_.listen(warmWindow));
-    g_warmListeners.push_back(Event::bus()->m_events.config.reloaded.listen(warmWindows));
     g_warmListeners.push_back(Event::bus()->m_events.monitor.layoutChanged.listen(warmWindows));
-    g_warmTimer = makeShared<CEventLoopTimer>(
-        std::chrono::milliseconds(1),
-        [](const SP<CEventLoopTimer>& self, void*) {
-            warmWindows();
-            self->updateTimeout(std::chrono::seconds(1));
-        },
-        nullptr);
-    g_pEventLoopManager->addTimer(g_warmTimer);
+    g_initialWarm = g_pEventLoopManager->doLaterLock(warmWindows);
 }
 
 void uploadReadyAppIcons() {
@@ -135,11 +121,15 @@ SP<Render::ITexture> appIconTextureForWindow(const PHLWINDOW& window, int sizePx
     return RESULT ? textureForIcon(*RESULT) : nullptr;
 }
 
+void invalidateAppIconCache() {
+    if (g_loader)
+        g_loader->invalidate();
+    warmWindows();
+}
+
 void clearAppIconCache() {
     g_warmListeners.clear();
-    if (g_warmTimer && g_pEventLoopManager)
-        g_pEventLoopManager->removeTimer(g_warmTimer);
-    g_warmTimer.reset();
+    g_initialWarm.reset();
     g_loader.reset();
     g_textureCache.clear();
 }

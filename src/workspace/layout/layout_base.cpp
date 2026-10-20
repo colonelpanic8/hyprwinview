@@ -25,7 +25,7 @@ HTLayoutBase::HTLayoutBase(VIEWID new_view_id) : view_id(new_view_id) {
     ;
 }
 
-void HTLayoutBase::on_move_swipe(Vector2D delta) {
+void HTLayoutBase::on_move_swipe(Vector2D) {
     ;
 }
 
@@ -48,7 +48,7 @@ WORKSPACEID HTLayoutBase::get_ws_id_in_direction(int x, int y, std::string& dire
     return get_ws_id_from_xy(x, y);
 }
 
-bool HTLayoutBase::on_mouse_axis(double delta) {
+bool HTLayoutBase::on_mouse_axis(double) {
     return false;
 }
 
@@ -73,7 +73,7 @@ void HTLayoutBase::init_position() {
     ;
 }
 
-void HTLayoutBase::build_overview_layout(HTViewStage stage) {
+void HTLayoutBase::build_overview_layout(HTViewStage) {
     ;
 }
 
@@ -144,10 +144,9 @@ void HTLayoutBase::render_jump_labels() {
 
         // Text rasterization is relatively expensive and these glyphs are immutable for a
         // given scale/color, so retain one texture per rendered label style.
-        static std::unordered_map<std::string, SP<Render::ITexture>> texture_cache;
         const std::string texture_key = std::string(1, LABELS[i]) + ":" +
             std::to_string(font_size) + ":" + std::to_string(label_color_value);
-        auto& texture = texture_cache[texture_key];
+        auto& texture = ht_manager->jump_label_textures[texture_key];
         if (texture == nullptr) {
             texture = g_pHyprRenderer->renderText(std::string(1, LABELS[i]), label_color, font_size,
                                                   false, "", 0, 700);
@@ -245,9 +244,17 @@ CBox HTLayoutBase::get_global_window_box(PHLWINDOW window, WORKSPACEID workspace
     return {top_left, bottom_right - top_left};
 }
 
+CBox HTLayoutBase::layout_box(WORKSPACEID workspace_id) const {
+    // operator[] would insert an empty slot at (0, 0) that get_ws_id_from_xy could then return.
+    const auto it = overview_layout.find(workspace_id);
+    return it == overview_layout.end() ? CBox{} : it->second.box;
+}
+
 CBox HTLayoutBase::get_global_ws_box(WORKSPACEID workspace_id) {
-    const CBox     scaled_ws_box = overview_layout[workspace_id].box;
-    const Vector2D top_left      = local_ws_scaled_to_global(scaled_ws_box.pos(), workspace_id);
+    const CBox scaled_ws_box = layout_box(workspace_id);
+    if (scaled_ws_box.empty())
+        return {};
+    const Vector2D top_left = local_ws_scaled_to_global(scaled_ws_box.pos(), workspace_id);
     const Vector2D bottom_right =
         local_ws_scaled_to_global(scaled_ws_box.pos() + scaled_ws_box.size(), workspace_id);
     return {top_left, bottom_right - top_left};
@@ -258,7 +265,7 @@ Vector2D HTLayoutBase::global_to_local_ws_unscaled(Vector2D pos, WORKSPACEID wor
     if (monitor == nullptr)
         return {};
 
-    CBox workspace_box = overview_layout[workspace_id].box;
+    const CBox workspace_box = layout_box(workspace_id);
     if (workspace_box.empty())
         return {};
     pos -= monitor->m_position;
@@ -284,7 +291,7 @@ Vector2D HTLayoutBase::local_ws_unscaled_to_global(Vector2D pos, WORKSPACEID wor
     if (monitor == nullptr)
         return {};
 
-    CBox workspace_box = overview_layout[workspace_id].box;
+    const CBox workspace_box = layout_box(workspace_id);
     if (workspace_box.empty())
         return {};
     pos *= workspace_box.w / monitor->m_transformedSize.x;

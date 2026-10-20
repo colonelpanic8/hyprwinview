@@ -26,6 +26,8 @@ using Hyprutils::Utils::CScopeGuard;
 
 HTLayoutLinear::HTLayoutLinear(VIEWID new_view_id) : HTLayoutBase(new_view_id) {
     auto& anim_tree = Config::animationTree();
+    // The temporary weak reference cannot release the animation's live unique owner.
+    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDelete)
     Animation::mgr()->createAnimation(
         0.f, scroll_offset, anim_tree->getAnimationPropertyConfig("windowsMove"), AVARDAMAGE_NONE);
     Animation::mgr()->createAnimation(
@@ -87,7 +89,7 @@ void HTLayoutLinear::on_hide(CallbackFun on_complete) {
     *dim_opacity   = 0;
 }
 
-void HTLayoutLinear::on_move(WORKSPACEID old_id, WORKSPACEID new_id, CallbackFun on_complete) {
+void HTLayoutLinear::on_move(WORKSPACEID, WORKSPACEID new_id, CallbackFun on_complete) {
     CScopeGuard      x([this, &on_complete] {
         if (on_complete != nullptr)
             scroll_offset->setCallbackOnEnd(on_complete);
@@ -105,9 +107,12 @@ void HTLayoutLinear::on_move(WORKSPACEID old_id, WORKSPACEID new_id, CallbackFun
 
     build_overview_layout(HT_VIEW_ANIMATING);
 
-    const float cur_screen_min_x = overview_layout[new_id].box.x - GAP_SIZE;
-    const float cur_screen_max_x =
-        overview_layout[new_id].box.x + overview_layout[new_id].box.w + GAP_SIZE;
+    const auto target_layout = overview_layout.find(new_id);
+    if (target_layout == overview_layout.end())
+        return;
+    const CBox& target_box       = target_layout->second.box;
+    const float cur_screen_min_x = target_box.x - GAP_SIZE;
+    const float cur_screen_max_x = target_box.x + target_box.w + GAP_SIZE;
 
     if (cur_screen_min_x < 0) {
         *scroll_offset = scroll_offset->value() - cur_screen_min_x;
@@ -155,7 +160,7 @@ bool HTLayoutLinear::on_mouse_axis(double delta) {
     return true;
 }
 
-const float calculate_y(float size_y, float offset_value, float max_offset) {
+static float calculate_y(float size_y, float offset_value, float max_offset) {
     const bool top = HTConfig::value<Config::INTEGER>("linear:top");
     if (top)
         return offset_value - max_offset;
@@ -224,7 +229,7 @@ void HTLayoutLinear::init_position() {
     view_offset->setValueAndWarp(0);
 }
 
-CBox HTLayoutLinear::calculate_ws_box(int x, int y, HTViewStage stage) {
+CBox HTLayoutLinear::calculate_ws_box(int x, int, HTViewStage stage) {
     const PHLMONITOR monitor = get_monitor();
     if (monitor == nullptr)
         return {};
@@ -276,7 +281,7 @@ void HTLayoutLinear::build_overview_layout(HTViewStage stage) {
     }
     std::sort(monitor_workspaces.begin(), monitor_workspaces.end());
 
-    WORKSPACEID big_id = monitor_workspaces.back();
+    WORKSPACEID big_id = monitor_workspaces.empty() ? 1 : monitor_workspaces.back();
     while (State::workspaceState()->query().id(big_id).run() != nullptr)
         big_id++;
     monitor_workspaces.push_back(big_id);
@@ -316,6 +321,8 @@ void HTLayoutLinear::render() {
     // Do a dance with active workspaces: Hyprland will only properly render the
     // current active one so make the workspace active before rendering it, etc
     const PHLWORKSPACE start_workspace = monitor->m_activeWorkspace;
+    if (start_workspace == nullptr)
+        return;
     Animation::Workspace::startAnimation(start_workspace, Animation::Workspace::ANIMATION_TYPE_OUT,
                                          false, true);
     start_workspace->m_visible = false;
