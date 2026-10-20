@@ -7,7 +7,6 @@
 #include <cstdint>
 #include <exception>
 #include <optional>
-#include <sstream>
 #include <string>
 #include <utility>
 
@@ -43,6 +42,7 @@
 #include "overview/animation.hpp"
 
 #include "overview/text.hpp"
+#include "overview/filter.hpp"
 #include "winview_pass_element.hpp"
 #include "workspace/render.hpp"
 
@@ -50,20 +50,9 @@ using namespace WinviewConfig;
 using Winview::configStringOr;
 using Winview::trimmedLower;
 
-static constexpr uint64_t       DEFAULT_BACKGROUND = PBACKGROUNDDefault;
+static constexpr uint64_t DEFAULT_BACKGROUND = PBACKGROUNDDefault;
 
-static std::vector<std::string> queryTokens(const std::string& query) {
-    std::vector<std::string> result;
-    std::stringstream        stream(Winview::lowercase(query));
-    std::string              token;
-
-    while (stream >> token)
-        result.push_back(token);
-
-    return result;
-}
-
-static std::string windowTitle(const PHLWINDOW& window) {
+static std::string        windowTitle(const PHLWINDOW& window) {
     if (!window)
         return "";
 
@@ -91,15 +80,11 @@ static std::string searchableWindowText(const PHLWINDOW& window) {
                               window->m_initialTitle + " " + window->m_initialClass);
 }
 
-static bool windowMatchesQuery(const PHLWINDOW& window, const std::string& query) {
-    const auto TOKENS = queryTokens(query);
-    if (TOKENS.empty())
+static bool windowMatchesQuery(const PHLWINDOW& window, const std::vector<std::string>& tokens) {
+    if (tokens.empty())
         return true;
 
-    const auto SEARCHABLE = searchableWindowText(window);
-    return std::ranges::all_of(TOKENS, [&SEARCHABLE](const std::string& token) {
-        return SEARCHABLE.find(token) != std::string::npos;
-    });
+    return Winview::matchesQuery(searchableWindowText(window), tokens);
 }
 
 static int workspaceGridColsForCount(int count) {
@@ -190,23 +175,40 @@ static double edgeSignedMargin(double anchor, double absolute, double relative, 
     return 0.0;
 }
 
-static CBox appIconBoxForTile(const CBox& tileLogical, double scale) {
-    const int SIZE   = static_cast<int>(std::max<Config::INTEGER>(1, *PAPPICONSIZE()));
-    Vector2D  anchor = iconAnchorFromPosition(configStringOr(PAPPICONPOSITION(), "bottom right"));
-    anchor.x         = anchorOverride(*PAPPICONANCHORX(), anchor.x);
-    anchor.y         = anchorOverride(*PAPPICONANCHORY(), anchor.y);
+struct SAppIconStyle {
+    int        size   = static_cast<int>(std::max<Config::INTEGER>(1, *PAPPICONSIZE()));
+    Vector2D   anchor = iconAnchorFromPosition(configStringOr(PAPPICONPOSITION(), "bottom right"));
+    Vector2D   margin{static_cast<double>(*PAPPICONMARGINX()),
+                    static_cast<double>(*PAPPICONMARGINY())};
+    Vector2D   relativeMargin{*PAPPICONMARGINRELX(), *PAPPICONMARGINRELY()};
+    Vector2D   offset{static_cast<double>(*PAPPICONOFFSETX()),
+                    static_cast<double>(*PAPPICONOFFSETY())};
+    CHyprColor backplate{static_cast<uint64_t>(*PAPPICONBACKPLATE())};
+    int        padding;
+    int        pixelSize;
 
-    const double xMargin = edgeSignedMargin(anchor.x, static_cast<double>(*PAPPICONMARGINX()),
-                                            *PAPPICONMARGINRELX(), tileLogical.w);
-    const double yMargin = edgeSignedMargin(anchor.y, static_cast<double>(*PAPPICONMARGINY()),
-                                            *PAPPICONMARGINRELY(), tileLogical.h);
-    const double x = tileLogical.x + anchor.x * std::max(0.0, tileLogical.w - SIZE) + xMargin +
-        static_cast<double>(*PAPPICONOFFSETX());
-    const double y = tileLogical.y + anchor.y * std::max(0.0, tileLogical.h - SIZE) + yMargin +
-        static_cast<double>(*PAPPICONOFFSETY());
+    explicit SAppIconStyle(double scale) :
+        padding(std::max(0,
+                         (int)std::round(static_cast<double>(std::max<Config::INTEGER>(
+                                             0, *PAPPICONBACKPLATEPADDING())) *
+                                         scale))),
+        pixelSize(appIconPixelSize(scale)) {
+        anchor.x = anchorOverride(*PAPPICONANCHORX(), anchor.x);
+        anchor.y = anchorOverride(*PAPPICONANCHORY(), anchor.y);
+    }
 
-    return CBox{x, y, (double)SIZE, (double)SIZE}.scale(scale).round();
-}
+    CBox boxForTile(const CBox& tileLogical, double scale) const {
+        const double xMargin =
+            edgeSignedMargin(anchor.x, margin.x, relativeMargin.x, tileLogical.w);
+        const double yMargin =
+            edgeSignedMargin(anchor.y, margin.y, relativeMargin.y, tileLogical.h);
+        const double x =
+            tileLogical.x + anchor.x * std::max(0.0, tileLogical.w - size) + xMargin + offset.x;
+        const double y =
+            tileLogical.y + anchor.y * std::max(0.0, tileLogical.h - size) + yMargin + offset.y;
+        return CBox{x, y, (double)size, (double)size}.scale(scale).round();
+    }
+};
 
 static bool previewableWindow(const PHLWINDOW& window) {
     if (!window || !window->m_isMapped || window->isHidden() || !window->m_workspace)
@@ -378,9 +380,10 @@ void CWindowOverview::rebuildVisiblePreviews(bool animate) {
         previews[selectedIndex].window :
         PHLWINDOW{};
 
+    const auto TOKENS = Winview::queryTokens(filterQuery);
     previews.clear();
     for (const auto& preview : allPreviews) {
-        if (windowMatchesQuery(preview.window, filterQuery))
+        if (windowMatchesQuery(preview.window, TOKENS))
             previews.push_back(preview);
     }
 
@@ -501,6 +504,7 @@ void CWindowOverview::render() {
     const auto   ANIMATION  = overviewAnimation();
     const auto   VISIBLE    = animationVisibleAmount();
     const auto   BASE_SCALE = std::clamp<double>(*PANIMATIONSCALE(), 0.01, 1.0);
+    const bool   SETTLED    = !closing && animationComplete();
 
     framePreviews.clear();
     framePreviews.reserve(exitingPreviews.size() + previews.size());
@@ -523,13 +527,14 @@ void CWindowOverview::render() {
         if (!previewableWindow(preview.window))
             continue;
 
-        const auto TILE_VISIBLE = tileAnimationVisibleAmount(i);
-        const auto WINDOW_ALPHA = animatedTileTextureAlpha(i, TILE_VISIBLE);
-        const auto TILE_SCALE =
-            animationScalesTiles(ANIMATION) ? BASE_SCALE + (1.0 - BASE_SCALE) * TILE_VISIBLE : 1.0;
-        CBox tilePx = scaleBoxFromCenter(animatedTileLogicalBox(i, TILE_VISIBLE), TILE_SCALE)
-                          .scale(SCALE)
-                          .round();
+        const auto TILE_VISIBLE = SETTLED ? 1.0 : tileAnimationVisibleAmount(i);
+        const auto WINDOW_ALPHA = SETTLED ? 1.0 : animatedTileTextureAlpha(i, TILE_VISIBLE);
+        const auto TILE_SCALE   = !SETTLED && animationScalesTiles(ANIMATION) ?
+              BASE_SCALE + (1.0 - BASE_SCALE) * TILE_VISIBLE :
+              1.0;
+        const auto TILE         = SETTLED ? filterTransitionTileLogicalBox(preview) :
+                                            animatedTileLogicalBox(i, TILE_VISIBLE);
+        CBox       tilePx       = scaleBoxFromCenter(TILE, TILE_SCALE).scale(SCALE).round();
         framePreviews.push_back({preview.window, tilePx, TILE_VISIBLE, WINDOW_ALPHA,
                                  (int)i == selectedIndex, preview.tileLogical.w * SCALE});
     }
@@ -577,8 +582,10 @@ void CWindowOverview::drawBackground() {
     if (BORDER <= 0)
         return;
 
+    const auto HOVER_COLOR  = CHyprColor(*PHOVERBORDER());
+    const auto BORDER_COLOR = CHyprColor(*PBORDER());
     for (const auto& preview : framePreviews) {
-        const auto COLOR = preview.selected ? CHyprColor(*PHOVERBORDER()) : CHyprColor(*PBORDER());
+        const auto& COLOR = preview.selected ? HOVER_COLOR : BORDER_COLOR;
         Render::GL::g_pHyprOpenGL->renderRect(preview.tilePx.copy().expand(BORDER),
                                               multiplyAlpha(COLOR, preview.visible),
                                               {.damage = &fullDamage, .round = BORDER * 2});
@@ -589,30 +596,39 @@ void CWindowOverview::drawForeground() {
     if (!pMonitor)
         return;
 
-    const double SCALE      = pMonitor->m_scale;
-    const auto   VISIBLE    = animationVisibleAmount();
-    CRegion      fullDamage = {0, 0, INT16_MAX, INT16_MAX};
+    const double                 SCALE      = pMonitor->m_scale;
+    const auto                   VISIBLE    = animationVisibleAmount();
+    CRegion                      fullDamage = {0, 0, INT16_MAX, INT16_MAX};
+
+    std::optional<SAppIconStyle> iconStyle;
+    if (*PSHOWAPPICON() != 0 && !framePreviews.empty())
+        iconStyle.emplace(SCALE);
+    const bool SHOW_TEXT   = *PSHOWWINDOWTEXT() != 0;
+    const bool SHOW_FILTER = filterMode || !filterQuery.empty();
+    const auto TEXT_SIZE   = *PWINDOWTEXTSIZE();
+    const int  TEXT_PADDING =
+        std::max(0, (int)std::round(static_cast<double>(*PWINDOWTEXTPADDING()) * SCALE));
+    const int TEXT_FONT_SIZE = std::max(1, (int)std::round(static_cast<double>(TEXT_SIZE) * SCALE));
+    const auto TEXT_COLOR    = CHyprColor(*PWINDOWTEXTCOLOR());
+    const auto TEXT_BACKPLATE = CHyprColor(*PWINDOWTEXTBACKPLATE());
+    const auto TEXT_FONT =
+        SHOW_TEXT || SHOW_FILTER ? configStringOr(PWINDOWTEXTFONT(), "Sans") : std::string{};
 
     labels.beginFrame();
     for (const auto& preview : framePreviews) {
         const auto& tilePx      = preview.tilePx;
         const auto  tileVisible = preview.visible;
 
-        if (*PSHOWAPPICON() != 0) {
-            const int ICON_SIZE_PX = appIconPixelSize(SCALE);
-            if (const auto ICON = appIconTextureForWindow(preview.window, ICON_SIZE_PX)) {
+        if (iconStyle) {
+            if (const auto ICON = appIconTextureForWindow(preview.window, iconStyle->pixelSize)) {
                 CBox      currentLogicalTile{tilePx.x / SCALE, tilePx.y / SCALE, tilePx.w / SCALE,
                                         tilePx.h / SCALE};
-                CBox      iconBox = appIconBoxForTile(currentLogicalTile, SCALE);
-                const int PADDING =
-                    std::max(0,
-                             (int)std::round(static_cast<double>(std::max<Config::INTEGER>(
-                                                 0, *PAPPICONBACKPLATEPADDING())) *
-                                             SCALE));
+                CBox      iconBox = iconStyle->boxForTile(currentLogicalTile, SCALE);
+                const int PADDING = iconStyle->padding;
                 if (PADDING > 0)
                     Render::GL::g_pHyprOpenGL->renderRect(
                         iconBox.copy().expand(PADDING).round(),
-                        multiplyAlpha(CHyprColor(*PAPPICONBACKPLATE()), tileVisible),
+                        multiplyAlpha(iconStyle->backplate, tileVisible),
                         {.damage = &fullDamage, .round = std::max(1, PADDING)});
 
                 Render::GL::g_pHyprOpenGL->renderTexture(
@@ -620,11 +636,8 @@ void CWindowOverview::drawForeground() {
             }
         }
 
-        if (*PSHOWWINDOWTEXT() != 0) {
-            const int PADDING =
-                std::max(0, (int)std::round(static_cast<double>(*PWINDOWTEXTPADDING()) * SCALE));
-            const int FONT_SIZE =
-                std::max(1, (int)std::round(static_cast<double>(*PWINDOWTEXTSIZE()) * SCALE));
+        if (SHOW_TEXT) {
+            const int  PADDING   = TEXT_PADDING;
             const int  MAX_WIDTH = std::max(1, (int)std::round(preview.labelWidthPx - PADDING * 2));
             const auto TITLE     = windowTitle(preview.window);
             const auto CLASS     = windowClass(preview.window);
@@ -635,9 +648,8 @@ void CWindowOverview::drawForeground() {
                 lines.push_back(CLASS);
 
             if (!lines.empty()) {
-                const auto TEXT = labels.textureForLines(lines, FONT_SIZE, MAX_WIDTH,
-                                                         CHyprColor(*PWINDOWTEXTCOLOR()),
-                                                         configStringOr(PWINDOWTEXTFONT(), "Sans"));
+                const auto TEXT =
+                    labels.textureForLines(lines, TEXT_FONT_SIZE, MAX_WIDTH, TEXT_COLOR, TEXT_FONT);
                 if (TEXT.texture) {
                     const auto LABEL_SCALE =
                         std::min(1.0, std::max(0.0, tilePx.w - PADDING * 2) / TEXT.size.x);
@@ -652,7 +664,7 @@ void CWindowOverview::drawForeground() {
 
                     Render::GL::g_pHyprOpenGL->renderRect(
                         labelBox.copy().expand(PADDING).round(),
-                        multiplyAlpha(CHyprColor(*PWINDOWTEXTBACKPLATE()), tileVisible),
+                        multiplyAlpha(TEXT_BACKPLATE, tileVisible),
                         {.damage = &fullDamage, .round = std::max(1, PADDING)});
                     Render::GL::g_pHyprOpenGL->renderTexture(
                         TEXT.texture, labelBox, {.damage = &fullDamage, .a = (float)tileVisible});
@@ -661,10 +673,10 @@ void CWindowOverview::drawForeground() {
         }
     }
 
-    if (filterMode || !filterQuery.empty()) {
+    if (SHOW_FILTER) {
         const int PADDING = std::max(4, (int)std::round(8.0 * SCALE));
         const int FONT_SIZE =
-            std::max(1, (int)std::round(static_cast<double>(*PWINDOWTEXTSIZE() + 2) * SCALE));
+            std::max(1, (int)std::round(static_cast<double>(TEXT_SIZE + 2) * SCALE));
         const int MAX_WIDTH = std::max(1, (int)std::round(pMonitor->m_transformedSize.x * 0.72));
         std::vector<std::string> lines = {
             "Filter: " + filterQuery + (filterMode ? "_" : ""),
@@ -673,8 +685,7 @@ void CWindowOverview::drawForeground() {
             lines.push_back("No matches");
 
         const auto TEXT =
-            labels.textureForLines(lines, FONT_SIZE, MAX_WIDTH, CHyprColor(*PWINDOWTEXTCOLOR()),
-                                   configStringOr(PWINDOWTEXTFONT(), "Sans"));
+            labels.textureForLines(lines, FONT_SIZE, MAX_WIDTH, TEXT_COLOR, TEXT_FONT);
         if (TEXT.texture) {
             CBox promptBox{
                 std::round((pMonitor->m_transformedSize.x - TEXT.size.x) / 2.0),
@@ -684,8 +695,7 @@ void CWindowOverview::drawForeground() {
                 TEXT.size.y,
             };
             Render::GL::g_pHyprOpenGL->renderRect(
-                promptBox.copy().expand(PADDING).round(),
-                multiplyAlpha(CHyprColor(*PWINDOWTEXTBACKPLATE()), VISIBLE),
+                promptBox.copy().expand(PADDING).round(), multiplyAlpha(TEXT_BACKPLATE, VISIBLE),
                 {.damage = &fullDamage, .round = std::max(1, PADDING)});
             Render::GL::g_pHyprOpenGL->renderTexture(TEXT.texture, promptBox,
                                                      {.damage = &fullDamage, .a = (float)VISIBLE});

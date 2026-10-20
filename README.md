@@ -60,7 +60,7 @@ default. Use `hyprpm --no-nix add ...` only when the system environment already
 provides Hyprland headers and the build dependencies listed in
 `CMakeLists.txt`.
 
-Version 0.2.1 includes both overview modes. The `hyprpm` compatibility pins
+Version 0.2.2 includes both overview modes. The `hyprpm` compatibility pins
 for Hyprland v0.56.0 and v0.56.2 both select this release's implementation.
 See [the changelog](CHANGELOG.md) for release fixes.
 

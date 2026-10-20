@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.2
+
+- Skip completed opening-animation calculations while retaining live filter transitions.
+- Resolve shared icon, text, and border drawing settings once per frame.
+- Tokenize each filter query once per preview rebuild instead of once per window.
+
 ## 0.2.1
 
 - Fix plugin unload/reload lifetime, and explicitly remove event listeners and GPU caches at shutdown.

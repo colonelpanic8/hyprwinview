@@ -1,4 +1,5 @@
 #include "overview/text.hpp"
+#include "overview/filter.hpp"
 #include "overview/grouping.hpp"
 #include "workspace/layer.hpp"
 
@@ -12,6 +13,19 @@ static void expect(bool condition, const char* message) {
         std::cerr << message << '\n';
         std::exit(1);
     }
+}
+
+static void testFilterMatching() {
+    const auto tokens = Winview::queryTokens("  TERminal\tBuild\n");
+    expect(tokens == std::vector<std::string>{"terminal", "build"}, "filter normalization changed");
+    expect(Winview::matchesQuery("build log terminal", tokens), "token order changed matching");
+    expect(Winview::matchesQuery("terminal rebuild", tokens), "substring matching changed");
+    expect(!Winview::matchesQuery("terminal", tokens), "missing query token matched");
+    expect(!Winview::matchesQuery("browser build", tokens), "reused query matched a missing token");
+    expect(Winview::matchesQuery("", Winview::queryTokens(" \t\n")),
+           "blank query excluded a window");
+    expect(Winview::matchesQuery("résumé 😀", Winview::queryTokens("résumé 😀")),
+           "UTF-8 query changed");
 }
 
 static void testFilterDeletion() {
@@ -58,6 +72,7 @@ static void testLayerArguments() {
 }
 
 int main() {
+    testFilterMatching();
     testFilterDeletion();
     testTitleElision();
     expect(Winview::stableGroupOrder({}).empty(), "empty grouping is not empty");
