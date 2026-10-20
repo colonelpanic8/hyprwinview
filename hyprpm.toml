@@ -2,8 +2,9 @@
 name = "hyprwinview"
 authors = ["Ivan Malison", "Raymond Bian"]
 commit_pins = [
-    # Hyprland v0.56.0: legacy window-only compatibility snapshot
-    ["36b2e0cfe0c6094dbc47bd42a437431315bb3087", "30796826ad253b886682d70b01564509cb721d66"],
+    # Hyprland v0.56.0 and v0.56.2: complete 0.2.1 plugin
+    ["36b2e0cfe0c6094dbc47bd42a437431315bb3087", "68aec467df05437edabcc96d12f4490ea8bb1684"],
+    ["efb50993780079460b0cbed1363e2166a2de1d9f", "68aec467df05437edabcc96d12f4490ea8bb1684"],
 ]
 
 [hyprwinview]
