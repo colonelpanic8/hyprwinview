@@ -48,7 +48,7 @@ void HTView::change_layout(const std::string& layout_name) {
         const std::string ERROR = std::format(
             "[Hyprtasking] Bad overview layout name {}, supported ones are 'grid' and 'linear'",
             layout_name);
-        Log::logger->log(ERR, "{}", ERROR);
+        LOG(Log::ERR, "{}", ERROR);
         HyprlandAPI::addNotification(PHANDLE, ERROR, CHyprColor{1.0, 0.2, 0.2, 1.0}, 5000);
         layout->init_position();
     }
@@ -75,16 +75,18 @@ void HTView::do_exit_behavior(bool exit_on_mouse) {
     if (active_workspace == nullptr)
         return;
 
-    const WORKSPACEID ws_id =
-        (exit_on_mouse || EXIT_ON_HOVERED) ? try_get_hover_id() : active_workspace->m_id;
-    PHLWORKSPACE workspace = State::workspaceState()->query().id(ws_id).run();
+    const WORKSPACEID ws_id     = (exit_on_mouse || EXIT_ON_HOVERED) ?
+            try_get_hover_id() :
+            HT::workspace_id(active_workspace);
+    PHLWORKSPACE      workspace = HT::find_workspace(ws_id);
 
     if (workspace == nullptr && ws_id != WORKSPACE_INVALID)
-        workspace = State::workspaceState()->create(ws_id, monitor->m_id);
+        workspace = HT::create_workspace(ws_id, monitor);
     if (workspace == nullptr)
         return;
 
     monitor->changeWorkspace(workspace);
+    workspace->ready();
 }
 
 void HTView::show(bool recalculate) {
@@ -140,12 +142,13 @@ void HTView::hide(bool exit_on_mouse, std::optional<WORKSPACEID> target_workspac
     }
 
     if (target_workspace.has_value()) {
-        PHLWORKSPACE workspace = State::workspaceState()->query().id(*target_workspace).run();
+        PHLWORKSPACE workspace = HT::find_workspace(*target_workspace);
         if (workspace == nullptr && *target_workspace != WORKSPACE_INVALID)
-            workspace = State::workspaceState()->create(*target_workspace, monitor->m_id);
+            workspace = HT::create_workspace(*target_workspace, monitor);
         if (workspace == nullptr)
             return;
         monitor->changeWorkspace(workspace);
+        workspace->ready();
     } else {
         do_exit_behavior(exit_on_mouse);
     }
@@ -198,9 +201,9 @@ void HTView::move_id(WORKSPACEID ws_id, bool move_window) {
     if (hovered_window == nullptr && move_window)
         should_move = false;
 
-    PHLWORKSPACE other_workspace = State::workspaceState()->query().id(ws_id).run();
+    PHLWORKSPACE other_workspace = HT::find_workspace(ws_id);
     if (other_workspace == nullptr && ws_id != WORKSPACE_INVALID)
-        other_workspace = State::workspaceState()->create(ws_id, monitor->m_id);
+        other_workspace = HT::create_workspace(ws_id, monitor);
     if (other_workspace == nullptr)
         return;
 
@@ -208,6 +211,7 @@ void HTView::move_id(WORKSPACEID ws_id, bool move_window) {
     if (move_window && should_move) {
         Desktop::globalWindowController()->moveWindowToWorkspace(hovered_window, other_workspace);
     }
+    other_workspace->ready();
 
     Config::INTEGER warp;
 
@@ -221,10 +225,11 @@ void HTView::move_id(WORKSPACEID ws_id, bool move_window) {
 
     const uint64_t TRANSITION = transition.begin();
     navigating                = true;
-    layout->on_move(active_workspace->m_id, other_workspace->m_id, [this, TRANSITION](auto) {
-        if (transition.is_current(TRANSITION))
-            navigating = false;
-    });
+    layout->on_move(HT::workspace_id(active_workspace), HT::workspace_id(other_workspace),
+                    [this, TRANSITION](auto) {
+                        if (transition.is_current(TRANSITION))
+                            navigating = false;
+                    });
 }
 
 void HTView::move(std::string arg, bool move_window) {
@@ -242,8 +247,8 @@ void HTView::move(std::string arg, bool move_window) {
         return;
 
     // if moving a window, the up/down/left/right should be relative to the window (and cursor) and not necessarily the active workspace
-    const WORKSPACEID source_ws_id =
-        move_window ? hovered_window->workspaceID() : active_workspace->m_id;
+    const WORKSPACEID source_ws_id = move_window ? HT::workspace_id(hovered_window->m_workspace) :
+                                                   HT::workspace_id(active_workspace);
     if (!navigating && !active) {
         layout->init_position();
     } else {
@@ -261,6 +266,6 @@ void HTView::move(std::string arg, bool move_window) {
 PHLMONITOR HTView::get_monitor() {
     const PHLMONITOR monitor = State::monitorState()->query().id(monitor_id).run();
     if (monitor == nullptr)
-        Log::logger->log(Log::WARN, "[Hyprtasking] Returning null monitor from get_monitor!");
+        LOG(Log::WARN, "[Hyprtasking] Returning null monitor from get_monitor!");
     return monitor;
 }

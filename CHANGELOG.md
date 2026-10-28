@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.0
+
+- Support Hyprland 0.57: follow its window, workspace, keybind, logging, and render-context APIs. Hyprland 0.56 is supported by the 0.2.2 release.
+- Hyprland 0.57 removed plugin string dispatchers. Use the `hl.plugin.hyprwinview.*` and `hl.plugin.hyprtasking.*` Lua functions instead of `hyprctl dispatch`; `hyprtasking.if_active` and `hyprtasking.if_not_active` can no longer forward to another dispatcher.
+- The linear workspace overview lists numbered workspaces only, since Hyprland 0.57 named workspaces no longer have numeric IDs.
+
 ## 0.2.2
 
 - Skip completed opening-animation calculations while retaining live filter transitions.

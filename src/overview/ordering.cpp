@@ -16,7 +16,7 @@ using Winview::trimmedLower;
 #define protected public
 #include <hyprland/src/config/ConfigValue.hpp>
 #include <hyprland/src/config/ConfigManager.hpp>
-#include <hyprland/src/desktop/view/Window.hpp>
+#include <hyprland/src/desktop/view/window/Window.hpp>
 #undef private
 #undef protected
 
@@ -31,7 +31,8 @@ static std::string uniqueWindowGroupKey(const PHLWINDOW&, size_t originalIndex) 
 
 static std::string applicationGroupKey(const PHLWINDOW& window, size_t originalIndex) {
     if (window) {
-        for (const auto& candidate : {window->m_class, window->m_initialClass}) {
+        for (const auto& candidate :
+             {window->metadata().appID(), window->metadata().initialAppID()}) {
             const auto KEY = trimmedLower(candidate);
             if (!KEY.empty())
                 return "app:" + KEY;

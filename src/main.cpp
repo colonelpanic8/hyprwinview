@@ -42,8 +42,8 @@ static void failNotif(const std::string& reason) {
 static bool addConfigValue(const SP<Config::Values::IValue>& value) {
     const auto RET = Config::mgr()->registerPluginValue(PHANDLE, value);
     if (!RET) {
-        Log::logger->log(Log::ERR, "[hyprwinview] failed to register plugin value \"{}\": {}",
-                         value->name(), RET.error());
+        LOG(Log::ERR, "[hyprwinview] failed to register plugin value \"{}\": {}", value->name(),
+            RET.error());
         return false;
     }
 
@@ -67,18 +67,18 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     WINVIEW_SETTINGS(REGISTER_SETTING)
 #undef REGISTER_SETTING
 
-    renderStage = Event::bus()->m_events.render.stage.listen([](eRenderStage stage) {
-        if (stage != RENDER_LAST_MOMENT)
-            return;
+    renderStage =
+        Event::bus()->m_events.render.stage.listen([](const Event::SRenderStageEvent& event) {
+            if (event.stage != RENDER_LAST_MOMENT || !event.context)
+                return;
 
-        uploadReadyAppIcons();
-        if (!g_pWindowOverview)
-            return;
+            uploadReadyAppIcons();
+            if (!g_pWindowOverview)
+                return;
 
-        const auto MONITOR = g_pHyprRenderer->m_renderData.pMonitor.lock();
-        if (MONITOR && g_pWindowOverview->pMonitor == MONITOR)
-            g_pWindowOverview->render();
-    });
+            if (event.monitor && g_pWindowOverview->pMonitor == event.monitor)
+                g_pWindowOverview->render(event.context->get());
+        });
 
     monitorRemoved = Event::bus()->m_events.monitor.removed.listen([](const PHLMONITOR& monitor) {
         if (g_pWindowOverview && g_pWindowOverview->pMonitor == monitor)
@@ -128,7 +128,8 @@ APICALL EXPORT void PLUGIN_EXIT() {
     g_pWindowOverview.reset();
     shutdownWorkspaceOverview();
     clearAppIconCache();
-    g_pHyprRenderer->m_renderPass.removeAllOfType("CWinviewPassElement");
-    g_pHyprRenderer->m_renderPass.removeAllOfType("COverviewRenderContextPassElement");
-    g_pHyprRenderer->m_renderPass.removeAllOfType("HTDisableSimplification");
+    auto& pass = g_pHyprRenderer->context().m_pass;
+    pass.removeAllOfType("CWinviewPassElement");
+    pass.removeAllOfType("COverviewRenderContextPassElement");
+    pass.removeAllOfType("HTDisableSimplification");
 }

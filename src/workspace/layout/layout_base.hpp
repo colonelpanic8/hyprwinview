@@ -72,17 +72,17 @@ class HTLayoutBase {
     virtual void build_overview_layout(HTViewStage stage);
 
     // Render the overview
-    virtual void render();
+    virtual void render(CRenderContext& ctx);
 
     // Workspaces in the same visual order used by the keyboard jump labels.
     std::vector<WORKSPACEID>   jump_targets() const;
     std::optional<WORKSPACEID> jump_target(size_t index) const;
 
     // Prevent simplification from happening in the plugin, remove all clear pass objects
-    void post_render();
+    void post_render(CRenderContext& ctx);
 
     // Draw keyboard jump labels over the workspace previews.
-    void                render_jump_labels();
+    void                render_jump_labels(CRenderContext& ctx);
 
     PHLMONITOR          get_monitor();
     WORKSPACEID         get_ws_id_from_global(Vector2D pos);

@@ -17,7 +17,7 @@
 #include <hyprland/src/desktop/state/FocusState.hpp>
 #include <hyprland/src/desktop/state/GlobalWindowController.hpp>
 #include <hyprland/src/desktop/state/WindowState.hpp>
-#include <hyprland/src/desktop/view/Window.hpp>
+#include <hyprland/src/desktop/view/window/Window.hpp>
 #include <hyprland/src/helpers/time/Time.hpp>
 #include <hyprland/src/layout/LayoutManager.hpp>
 #include <hyprland/src/managers/eventLoop/EventLoopManager.hpp>
@@ -56,20 +56,20 @@ static std::string        windowTitle(const PHLWINDOW& window) {
     if (!window)
         return "";
 
-    if (!window->m_title.empty())
-        return window->m_title;
+    if (!window->metadata().title().empty())
+        return window->metadata().title();
 
-    return window->m_initialTitle;
+    return window->metadata().initialTitle();
 }
 
 static std::string windowClass(const PHLWINDOW& window) {
     if (!window)
         return "";
 
-    if (!window->m_class.empty())
-        return window->m_class;
+    if (!window->metadata().appID().empty())
+        return window->metadata().appID();
 
-    return window->m_initialClass;
+    return window->metadata().initialAppID();
 }
 
 static std::string searchableWindowText(const PHLWINDOW& window) {
@@ -77,7 +77,8 @@ static std::string searchableWindowText(const PHLWINDOW& window) {
         return "";
 
     return Winview::lowercase(windowTitle(window) + " " + windowClass(window) + " " +
-                              window->m_initialTitle + " " + window->m_initialClass);
+                              window->metadata().initialTitle() + " " +
+                              window->metadata().initialAppID());
 }
 
 static bool windowMatchesQuery(const PHLWINDOW& window, const std::vector<std::string>& tokens) {
@@ -211,7 +212,7 @@ struct SAppIconStyle {
 };
 
 static bool previewableWindow(const PHLWINDOW& window) {
-    if (!window || !window->m_isMapped || window->isHidden() || !window->m_workspace)
+    if (!window || !window->mapped() || window->isHidden() || !window->m_workspace)
         return false;
 
     const auto SIZE = window->size(Desktop::View::IGeometric::GEOMETRIC_CURRENT);
@@ -223,16 +224,17 @@ static bool minimizedWorkspace(const PHLWORKSPACE& workspace) {
     if (!workspace)
         return false;
 
-    const auto& NAME = workspace->m_name;
+    const auto& NAME = workspace->addressableName();
     return NAME == "special:minimized" || NAME == "minimized" ||
-        (workspace->m_isSpecialWorkspace && NAME.find("minimized") != std::string::npos);
+        (workspace->type() == Workspace::eWorkspaceType::SPECIAL &&
+         NAME.find("minimized") != std::string::npos);
 }
 
 static bool scratchpadWorkspace(const PHLWORKSPACE& workspace) {
     if (!workspace)
         return false;
 
-    const auto& NAME = workspace->m_name;
+    const auto& NAME = workspace->addressableName();
     return NAME == "special:NSP" || NAME == "NSP" || NAME.starts_with("scratch-hidden-");
 }
 
@@ -349,19 +351,21 @@ void CWindowOverview::updateWorkspaceGrid() {
     int workspaceCount = 1;
 
     for (const auto& workspace : State::workspaceState()->workspaces()) {
-        if (!workspace || workspace->m_isSpecialWorkspace || workspace->m_id <= 0)
+        const auto ID = workspace ? workspace->numberedID() : std::nullopt;
+        if (!ID)
             continue;
 
-        workspaceCount = std::max(workspaceCount, (int)workspace->m_id);
+        workspaceCount = std::max(workspaceCount, (int)*ID);
     }
 
     for (const auto& preview : allPreviews) {
-        if (!preview.window || !preview.window->m_workspace ||
-            preview.window->m_workspace->m_isSpecialWorkspace ||
-            preview.window->m_workspace->m_id <= 0)
+        const auto ID = preview.window && preview.window->m_workspace ?
+            preview.window->m_workspace->numberedID() :
+            std::nullopt;
+        if (!ID)
             continue;
 
-        workspaceCount = std::max(workspaceCount, (int)preview.window->m_workspace->m_id);
+        workspaceCount = std::max(workspaceCount, (int)*ID);
     }
 
     workspaceGridCount = workspaceCount;
@@ -485,7 +489,7 @@ int CWindowOverview::hoveredIndex() const {
     return -1;
 }
 
-void CWindowOverview::render() {
+void CWindowOverview::render(Render::CRenderContext& ctx) {
     if (closing && animationComplete()) {
         finishClose();
         return;
@@ -539,7 +543,7 @@ void CWindowOverview::render() {
                                  (int)i == selectedIndex, preview.tileLogical.w * SCALE});
     }
 
-    g_pHyprRenderer->m_renderPass.add(makeUnique<CWinviewPassElement>(false));
+    Render::IHyprRenderer::addPassElement(ctx, makeUnique<CWinviewPassElement>(false));
 
     const auto MONITOR = pMonitor.lock();
     if (!MONITOR)
@@ -548,18 +552,18 @@ void CWindowOverview::render() {
     for (const auto& preview : framePreviews) {
         CBox globalLogical = preview.tilePx.copy().scale(1.0 / SCALE);
         globalLogical      = globalLogical.translate(MONITOR->m_position);
-        render_window_at_box(preview.window, MONITOR, NOW, globalLogical,
+        render_window_at_box(ctx, preview.window, MONITOR, NOW, globalLogical,
                              static_cast<float>(preview.windowAlpha));
     }
 
-    g_pHyprRenderer->m_renderPass.add(makeUnique<CWinviewPassElement>(true));
+    Render::IHyprRenderer::addPassElement(ctx, makeUnique<CWinviewPassElement>(true));
 
     // Software cursors are queued before RENDER_LAST_MOMENT, so the overview passes
     // above would cover them; queue another cursor draw on top. No-op with hardware
     // cursors (renderSoftwareCursorsFor returns early when none are locked).
     if (g_pHyprRenderer->shouldRenderCursor())
-        Pointer::mgr()->renderSoftwareCursorsFor(pMonitor.lock(), Time::steadyNow(),
-                                                 g_pHyprRenderer->m_renderData.damage);
+        Pointer::mgr()->renderSoftwareCursorsFor(ctx, pMonitor.lock(), Time::steadyNow(),
+                                                 ctx.m_data.damage);
 
     // Windows on inactive workspaces do not necessarily damage this monitor when their
     // contents update. Keep the overview on the monitor's refresh loop so every tile is
@@ -567,7 +571,7 @@ void CWindowOverview::render() {
     damage();
 }
 
-void CWindowOverview::drawBackground() {
+void CWindowOverview::drawBackground(Render::CRenderContext& ctx) {
     if (!pMonitor)
         return;
 
@@ -576,7 +580,8 @@ void CWindowOverview::drawBackground() {
     CRegion    fullDamage = {0, 0, INT16_MAX, INT16_MAX};
 
     Render::GL::g_pHyprOpenGL->renderRect(
-        CBox{{0, 0}, pMonitor->m_transformedSize}, multiplyAlpha(activeBackgroundColor(), VISIBLE),
+        ctx, CBox{{0, 0}, pMonitor->m_transformedSize},
+        multiplyAlpha(activeBackgroundColor(), VISIBLE),
         {.damage = &fullDamage, .blur = backgroundBlurEnabled(), .blurA = (float)VISIBLE});
 
     if (BORDER <= 0)
@@ -586,13 +591,13 @@ void CWindowOverview::drawBackground() {
     const auto BORDER_COLOR = CHyprColor(*PBORDER());
     for (const auto& preview : framePreviews) {
         const auto& COLOR = preview.selected ? HOVER_COLOR : BORDER_COLOR;
-        Render::GL::g_pHyprOpenGL->renderRect(preview.tilePx.copy().expand(BORDER),
+        Render::GL::g_pHyprOpenGL->renderRect(ctx, preview.tilePx.copy().expand(BORDER),
                                               multiplyAlpha(COLOR, preview.visible),
                                               {.damage = &fullDamage, .round = BORDER * 2});
     }
 }
 
-void CWindowOverview::drawForeground() {
+void CWindowOverview::drawForeground(Render::CRenderContext& ctx) {
     if (!pMonitor)
         return;
 
@@ -627,12 +632,12 @@ void CWindowOverview::drawForeground() {
                 const int PADDING = iconStyle->padding;
                 if (PADDING > 0)
                     Render::GL::g_pHyprOpenGL->renderRect(
-                        iconBox.copy().expand(PADDING).round(),
+                        ctx, iconBox.copy().expand(PADDING).round(),
                         multiplyAlpha(iconStyle->backplate, tileVisible),
                         {.damage = &fullDamage, .round = std::max(1, PADDING)});
 
                 Render::GL::g_pHyprOpenGL->renderTexture(
-                    ICON, iconBox, {.damage = &fullDamage, .a = (float)tileVisible});
+                    ctx, ICON, iconBox, {.damage = &fullDamage, .a = (float)tileVisible});
             }
         }
 
@@ -663,11 +668,12 @@ void CWindowOverview::drawForeground() {
                     };
 
                     Render::GL::g_pHyprOpenGL->renderRect(
-                        labelBox.copy().expand(PADDING).round(),
+                        ctx, labelBox.copy().expand(PADDING).round(),
                         multiplyAlpha(TEXT_BACKPLATE, tileVisible),
                         {.damage = &fullDamage, .round = std::max(1, PADDING)});
                     Render::GL::g_pHyprOpenGL->renderTexture(
-                        TEXT.texture, labelBox, {.damage = &fullDamage, .a = (float)tileVisible});
+                        ctx, TEXT.texture, labelBox,
+                        {.damage = &fullDamage, .a = (float)tileVisible});
                 }
             }
         }
@@ -695,9 +701,10 @@ void CWindowOverview::drawForeground() {
                 TEXT.size.y,
             };
             Render::GL::g_pHyprOpenGL->renderRect(
-                promptBox.copy().expand(PADDING).round(), multiplyAlpha(TEXT_BACKPLATE, VISIBLE),
+                ctx, promptBox.copy().expand(PADDING).round(),
+                multiplyAlpha(TEXT_BACKPLATE, VISIBLE),
                 {.damage = &fullDamage, .round = std::max(1, PADDING)});
-            Render::GL::g_pHyprOpenGL->renderTexture(TEXT.texture, promptBox,
+            Render::GL::g_pHyprOpenGL->renderTexture(ctx, TEXT.texture, promptBox,
                                                      {.damage = &fullDamage, .a = (float)VISIBLE});
         }
     }
@@ -851,7 +858,7 @@ void CWindowOverview::setFilterQuery(std::string query, bool animate) {
 }
 
 void CWindowOverview::focusWindow(const PHLWINDOW& window, bool bring, bool replaceInitial) {
-    if (!window || !window->m_isMapped || !window->m_workspace)
+    if (!window || !window->mapped() || !window->m_workspace)
         return;
 
     const auto FOCUSSTATE                  = Desktop::focusState();
@@ -864,7 +871,7 @@ void CWindowOverview::focusWindow(const PHLWINDOW& window, bool bring, bool repl
     const auto INITIAL_TARGET =
         initialFocusedWindow ? initialFocusedWindow->layoutTarget() : SP<Layout::ITarget>{};
     const bool CAN_REPLACE_INITIAL = replaceInitial && g_layoutManager && initialFocusedWindow &&
-        initialFocusedWindow != window && initialFocusedWindow->m_isMapped &&
+        initialFocusedWindow != window && initialFocusedWindow->mapped() &&
         initialFocusedWindow->m_workspace && SELECTED_ORIGINAL_WORKSPACE && SELECTED_TARGET &&
         INITIAL_TARGET && !Fullscreen::controller()->isFullscreen(window) &&
         !Fullscreen::controller()->isFullscreen(initialFocusedWindow);
@@ -872,7 +879,7 @@ void CWindowOverview::focusWindow(const PHLWINDOW& window, bool bring, bool repl
     if (CAN_REPLACE_INITIAL) {
         g_layoutManager->switchTargets(SELECTED_TARGET, INITIAL_TARGET, true);
     } else if (replaceInitial && initialFocusedWindow && initialFocusedWindow != window &&
-               initialFocusedWindow->m_isMapped && initialFocusedWindow->m_workspace &&
+               initialFocusedWindow->mapped() && initialFocusedWindow->m_workspace &&
                SELECTED_ORIGINAL_WORKSPACE &&
                initialFocusedWindow->m_workspace != SELECTED_ORIGINAL_WORKSPACE) {
         Desktop::globalWindowController()->moveWindowToWorkspace(initialFocusedWindow,
@@ -932,7 +939,7 @@ void closeWindowOverviewImmediately() {
     g_pWindowOverview.reset();
 
     if (g_pHyprRenderer)
-        g_pHyprRenderer->m_renderPass.removeAllOfType("CWinviewPassElement");
+        g_pHyprRenderer->context().m_pass.removeAllOfType("CWinviewPassElement");
     if (MONITOR && g_pHyprRenderer)
         g_pHyprRenderer->damageMonitor(MONITOR);
 }

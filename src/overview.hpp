@@ -18,15 +18,18 @@
 #include <xkbcommon/xkbcommon.h>
 
 class CEventLoopTimer;
+namespace Render {
+    class CRenderContext;
+}
 
 class CWindowOverview {
   public:
     explicit CWindowOverview(const PHLMONITOR& monitor, SWindowOverviewOptions options = {});
     ~CWindowOverview();
 
-    void          render();
-    void          drawBackground();
-    void          drawForeground();
+    void          render(Render::CRenderContext& ctx);
+    void          drawBackground(Render::CRenderContext& ctx);
+    void          drawForeground(Render::CRenderContext& ctx);
     void          damage();
     void          close(bool focusSelection = false, bool bringSelection = false,
                         bool replaceInitialSelection = false);

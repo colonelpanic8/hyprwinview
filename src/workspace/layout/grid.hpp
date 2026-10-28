@@ -45,7 +45,7 @@ class HTLayoutGrid final : public HTLayoutBase {
     virtual float       drag_window_scale();
     virtual void        init_position();
     virtual void        build_overview_layout(HTViewStage stage);
-    virtual void        render();
+    virtual void        render(CRenderContext& ctx);
 
     void refresh_workspace_cache(const std::unordered_set<WORKSPACEID>& extra_off_limits = {});
     WORKSPACEID                                        slot_workspace(int layer, int x, int y);

@@ -3,6 +3,7 @@
 #include <hyprland/src/desktop/DesktopTypes.hpp>
 #include <hyprland/src/devices/IKeyboard.hpp>
 #include <hyprland/src/helpers/AnimatedVariable.hpp>
+#include <hyprland/src/managers/input/InputManager.hpp>
 #include <hyprland/src/render/Texture.hpp>
 #include <string>
 #include <unordered_map>
@@ -35,12 +36,14 @@ class HTManager {
     void                 refresh_grid_caches_if_dirty(bool enforce_rules = true);
     void                 remove_view_for_monitor_id(MONITORID mid);
 
-    bool                 start_window_drag();
-    bool                 end_window_drag();
-    bool                 exit_to_workspace();
-    bool                 on_key(IKeyboard::SKeyEvent event);
-    bool                 on_mouse_move();
-    bool                 on_mouse_axis(double delta);
+    // Begins or ends a window drag like Hyprland's mouse binds.
+    static void change_mouse_bind_mode(eMouseBindMode mode);
+    bool        start_window_drag();
+    bool        end_window_drag();
+    bool        exit_to_workspace();
+    bool        on_key(IKeyboard::SKeyEvent event);
+    bool        on_mouse_move();
+    bool        on_mouse_axis(double delta);
 
     enum swipe_state_t {
         HT_SWIPE_OPEN,

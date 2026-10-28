@@ -4,19 +4,19 @@ HTPassElement::HTPassElement() {
     ;
 }
 
-std::vector<UP<IPassElement>> HTPassElement::draw() {
+std::vector<UP<IPassElement>> HTPassElement::draw(Render::CRenderContext&) {
     return {};
 }
 
-bool HTPassElement::needsLiveBlur() {
+bool HTPassElement::needsLiveBlur(Render::CRenderContext&) {
     return false;
 }
 
-bool HTPassElement::needsPrecomputeBlur() {
+bool HTPassElement::needsPrecomputeBlur(Render::CRenderContext&) {
     // hyprexpo uses false
     return true;
 }
 
-bool HTPassElement::disableSimplification() {
+bool HTPassElement::disableSimplification(Render::CRenderContext&) {
     return true;
 }

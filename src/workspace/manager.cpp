@@ -8,7 +8,6 @@
 #include <hyprland/src/config/ConfigManager.hpp>
 #include <hyprland/src/desktop/DesktopTypes.hpp>
 #include <hyprland/src/desktop/state/ViewState.hpp>
-#include <hyprland/src/managers/KeybindManager.hpp>
 #include <hyprland/src/managers/input/InputManager.hpp>
 #include <hyprland/src/state/MonitorState.hpp>
 #include <hyprland/src/state/WorkspacePlacementController.hpp>
@@ -78,7 +77,7 @@ PHLWINDOW HTManager::get_window_from_cursor(bool return_focused) {
     }
 
     const WORKSPACEID  ws_id             = cursor_view->layout->get_ws_id_from_global(mouse_coords);
-    const PHLWORKSPACE hovered_workspace = State::workspaceState()->query().id(ws_id).run();
+    const PHLWORKSPACE hovered_workspace = HT::find_workspace(ws_id);
     if (hovered_workspace == nullptr)
         return nullptr;
 
@@ -123,7 +122,7 @@ void HTManager::hide_all_views_immediately() {
     swipe_state = HT_SWIPE_NONE;
     swipe_amt   = 0.0;
     jump_pressed_keys.clear();
-    g_pKeybindManager->changeMouseBindMode(MBIND_INVALID);
+    change_mouse_bind_mode(MBIND_INVALID);
 
     for (PHTVIEW view : views) {
         if (view != nullptr && (view->active || view->closing || view->navigating))
@@ -166,9 +165,8 @@ void HTManager::register_monitors() {
         }
         views.push_back(makeShared<HTView>(monitor->m_id));
 
-        Log::logger->log(LOG, "[Hyprtasking] Registering view for monitor {} with resolution {}x{}",
-                         monitor->m_description, monitor->m_transformedSize.x,
-                         monitor->m_transformedSize.y);
+        LOG(Log::DEBUG, "[Hyprtasking] Registering view for monitor {} with resolution {}x{}",
+            monitor->m_description, monitor->m_transformedSize.x, monitor->m_transformedSize.y);
     }
     refresh_all_grid_caches();
 }
@@ -190,14 +188,14 @@ void HTManager::refresh_all_grid_caches(bool enforce_rules) {
     // so the migration would never happen.
     if (enforce_rules) {
         for (const auto& rule : Config::workspaceRuleMgr()->getAllWorkspaceRules()) {
-            if (rule->m_workspaceId <= 0)
+            const WORKSPACEID rule_id = HT::rule_workspace_id(*rule);
+            if (rule_id == WORKSPACE_INVALID)
                 continue;
-            const auto bound = Config::workspaceRuleMgr()->getBoundMonitorForWS(
-                rule->m_workspaceName.starts_with("name:") ? rule->m_workspaceName.substr(5) :
-                                                             rule->m_workspaceName);
+            const auto bound =
+                Config::workspaceRuleMgr()->getBoundMonitorForWS(rule->m_workspaceString);
             if (bound == nullptr)
                 continue;
-            const PHLWORKSPACE ws = State::workspaceState()->query().id(rule->m_workspaceId).run();
+            const PHLWORKSPACE ws = HT::find_workspace(rule_id);
             if (ws == nullptr)
                 continue;
             if (ws->m_monitor.lock() != bound)

@@ -19,8 +19,10 @@
 
 #include "../settings.hpp"
 
-static_assert(Winview::MOD_SHIFT == HL_MODIFIER_SHIFT && Winview::MOD_CTRL == HL_MODIFIER_CTRL &&
-              Winview::MOD_ALT == HL_MODIFIER_ALT && Winview::MOD_SUPER == HL_MODIFIER_META);
+static_assert(Winview::MOD_SHIFT == static_cast<uint32_t>(Input::HL_MODIFIER_SHIFT) &&
+              Winview::MOD_CTRL == static_cast<uint32_t>(Input::HL_MODIFIER_CTRL) &&
+              Winview::MOD_ALT == static_cast<uint32_t>(Input::HL_MODIFIER_ALT) &&
+              Winview::MOD_SUPER == static_cast<uint32_t>(Input::HL_MODIFIER_META));
 
 using KeySetting = const CConfigValue<Config::STRING>& (*)();
 
@@ -63,13 +65,14 @@ static Winview::SKeyBindings activeKeyBindings() {
     auto bindings = Winview::compileKeyBindings(
         Winview::resolveKeySpecs(OVERRIDES, configured, *WinviewConfig::PKEYSGO()));
     for (const auto& invalid : bindings.invalid)
-        Log::logger->log(Log::WARN, "[hyprwinview] ignoring invalid key binding {}", invalid);
+        LOG(Log::WARN, "[hyprwinview] ignoring invalid key binding {}", invalid);
     return bindings;
 }
 
 // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
 static std::string printableTextForKey(xkb_state* state, xkb_keycode_t keycode, uint32_t mods) {
-    constexpr uint32_t TEXT_BLOCKING_MODS = HL_MODIFIER_CTRL | HL_MODIFIER_ALT | HL_MODIFIER_META;
+    constexpr uint32_t TEXT_BLOCKING_MODS =
+        Winview::MOD_CTRL | Winview::MOD_ALT | Winview::MOD_SUPER;
     if (!state || (mods & TEXT_BLOCKING_MODS) != 0)
         return "";
 
@@ -119,7 +122,7 @@ bool CWindowOverview::handleKeyPress(const IKeyboard::SKeyEvent& event) {
 
     const auto KEYCODE = event.keycode + 8;
     const auto KEYSYM  = xkb_state_key_get_one_sym(KEYBOARD->m_xkbState, KEYCODE);
-    const auto MODS    = g_pInputManager->getModsFromAllKBs();
+    const auto MODS    = static_cast<uint32_t>(g_pInputManager->getModsFromAllKBs());
     const auto TEXT =
         filterMode ? printableTextForKey(KEYBOARD->m_xkbState, KEYCODE, MODS) : std::string();
     const auto ACTION = Winview::classifyKey(*keyBindings, filterMode,

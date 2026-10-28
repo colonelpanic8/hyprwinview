@@ -8,7 +8,7 @@
 #include <hyprland/src/output/Monitor.hpp>
 #include <hyprland/src/managers/eventLoop/EventLoopManager.hpp>
 #include <hyprland/src/state/MonitorState.hpp>
-#include <hyprland/src/desktop/view/Window.hpp>
+#include <hyprland/src/desktop/view/window/Window.hpp>
 #include <hyprland/src/render/Renderer.hpp>
 #undef private
 #undef protected
@@ -70,7 +70,8 @@ namespace {
         if (!window)
             return ids;
 
-        for (const auto& candidate : {window->m_class, window->m_initialClass}) {
+        for (const auto& candidate :
+             {window->metadata().appID(), window->metadata().initialAppID()}) {
             if (!candidate.empty() && std::ranges::find(ids, candidate) == ids.end())
                 ids.push_back(candidate);
         }
@@ -79,7 +80,7 @@ namespace {
     }
 
     void warmWindow(const PHLWINDOW& window) {
-        if (!window || !window->m_isMapped || !iconsEnabled())
+        if (!window || !window->mapped() || !iconsEnabled())
             return;
         const auto IDS = appIdsForWindow(window);
         if (IDS.empty())

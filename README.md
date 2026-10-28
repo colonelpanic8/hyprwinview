@@ -60,9 +60,9 @@ default. Use `hyprpm --no-nix add ...` only when the system environment already
 provides Hyprland headers and the build dependencies listed in
 `CMakeLists.txt`.
 
-Version 0.2.2 includes both overview modes. The `hyprpm` compatibility pins
-for Hyprland v0.56.0 and v0.56.2 both select this release's implementation.
-See [the changelog](CHANGELOG.md) for release fixes.
+Version 0.3.0 includes both overview modes and requires Hyprland v0.57.0. The
+`hyprpm` compatibility pins for Hyprland v0.56.0, v0.56.1, and v0.56.2 select
+the 0.2.2 release. See [the changelog](CHANGELOG.md) for release fixes.
 
 Workspace grid rows, columns, and layers are each limited to 1–32, bounding
 allocation to 32,768 slots per monitor.
@@ -76,8 +76,10 @@ hl.exec_once("hyprctl plugin load /path/to/libhyprwinview.so")
 ```
 
 Do not also load `libhyprtasking.so`. The combined plugin retains the existing
-`hyprtasking:*` dispatchers, `hl.plugin.hyprtasking.*` Lua functions, and
-`plugin.hyprtasking` configuration namespace for compatibility.
+`hl.plugin.hyprtasking.*` Lua functions and `plugin.hyprtasking` configuration
+namespace for compatibility. Hyprland 0.57 removed plugin string dispatchers,
+so the `hyprtasking:*` and `hyprwinview:*` dispatchers only work on Hyprland
+0.56 and older.
 
 ## Workspace Overview
 
@@ -97,11 +99,11 @@ render passes.
 Example bindings:
 
 ```lua
-hl.bind("SUPER + Tab", hl.dsp.exec_cmd("hyprctl dispatch hyprwinview:overview toggle"))
-hl.bind("SUPER + SHIFT + Tab", hl.dsp.exec_cmd("hyprctl dispatch hyprwinview:overview toggle other-workspaces"))
-hl.bind("SUPER + Return", hl.dsp.exec_cmd("hyprctl dispatch hyprwinview:overview select"))
-hl.bind("SUPER + SHIFT + Return", hl.dsp.exec_cmd("hyprctl dispatch hyprwinview:overview bring"))
-hl.bind("SUPER + Escape", hl.dsp.exec_cmd("hyprctl dispatch hyprwinview:overview close"))
+hl.bind("SUPER + Tab", function() hl.plugin.hyprwinview.overview("toggle") end)
+hl.bind("SUPER + SHIFT + Tab", function() hl.plugin.hyprwinview.overview("toggle other-workspaces") end)
+hl.bind("SUPER + Return", function() hl.plugin.hyprwinview.overview("select") end)
+hl.bind("SUPER + SHIFT + Return", function() hl.plugin.hyprwinview.overview("bring") end)
+hl.bind("SUPER + Escape", function() hl.plugin.hyprwinview.overview("close") end)
 ```
 
 Plugin options:
@@ -272,6 +274,9 @@ On Hyprland 0.54 and older hyprlang configs, the same options live under
 `plugin { hyprwinview { ... } }`.
 
 ## Dispatchers
+
+On Hyprland 0.57, pass these commands, without the `hyprwinview:overview`
+prefix, to `hl.plugin.hyprwinview.overview`.
 
 ```hyprlang
 hyprwinview:overview toggle

@@ -5,8 +5,8 @@
 
 #include <algorithm>
 #include <cmath>
-#include <hyprland/src/desktop/view/Window.hpp>
-#include <hyprland/src/desktop/Workspace.hpp>
+#include <hyprland/src/desktop/view/window/Window.hpp>
+#include <hyprland/src/workspace/HLWorkspace.hpp>
 #include <hyprland/src/output/Monitor.hpp>
 #include <hyprland/src/helpers/time/Time.hpp>
 
@@ -163,8 +163,8 @@ double CWindowOverview::maxTileAnimationDelayMs() const {
 }
 
 int CWindowOverview::workspacePanelIndexForWorkspace(const PHLWORKSPACE& workspace) const {
-    if (workspace && !workspace->m_isSpecialWorkspace && workspace->m_id > 0)
-        return std::clamp((int)workspace->m_id - 1, 0, std::max(0, workspaceGridCount - 1));
+    if (const auto ID = workspace ? workspace->numberedID() : std::nullopt)
+        return std::clamp((int)*ID - 1, 0, std::max(0, workspaceGridCount - 1));
 
     return std::clamp(workspaceGridCount / 2, 0, std::max(0, workspaceGridCount - 1));
 }

@@ -12,9 +12,6 @@
 #include "../globals.hpp"
 #include "manager.hpp"
 
-inline constexpr auto LOG = Hyprutils::CLI::LOG_DEBUG;
-inline constexpr auto ERR = Hyprutils::CLI::LOG_ERR;
-
 inline CFunctionHook* render_workspace_hook     = nullptr;
 inline CFunctionHook* render_texture_hook       = nullptr;
 inline CFunctionHook* render_border_hook        = nullptr;

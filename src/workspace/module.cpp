@@ -10,7 +10,6 @@
 #include <hyprland/src/devices/IKeyboard.hpp>
 #include <hyprland/src/output/Monitor.hpp>
 #include <hyprland/src/macros.hpp>
-#include <hyprland/src/managers/KeybindManager.hpp>
 #include <hyprland/src/layout/LayoutManager.hpp>
 #include <hyprland/src/pointer/PointerManager.hpp>
 #include <hyprland/src/managers/input/InputManager.hpp>
@@ -55,26 +54,13 @@ static std::vector<CHyprSignalListener> callbackListeners;
     }                                                                                                      \
     static SDispatchResult dispatch_##name([[maybe_unused]] std::string arg)
 
+// Hyprland 0.57 removed named string dispatchers, so there is nothing to pass through to.
 static SDispatchResult dispatch(std::string arg) {
-    const auto DISPATCHSTR = arg.substr(0, arg.find_first_of(' '));
-
-    auto       DISPATCHARG = std::string();
-    if ((int)arg.find_first_of(' ') != -1)
-        DISPATCHARG = arg.substr(arg.find_first_of(' ') + 1);
-
-    const auto DISPATCHER = g_pKeybindManager->m_dispatchers.find(DISPATCHSTR);
-    if (DISPATCHER == g_pKeybindManager->m_dispatchers.end())
-        return {.success = false, .error = "invalid dispatcher: " + arg};
-
-    SDispatchResult res = DISPATCHER->second(DISPATCHARG);
-
-    Log::logger->log(LOG, "[Hyprtasking] passthrough dispatch: {} : {}{}", DISPATCHSTR, DISPATCHARG,
-                     res.success ? "" : " -> " + res.error);
-
-    return res;
+    return {.success = false,
+            .error   = "string dispatchers are unavailable since Hyprland 0.57, cannot dispatch: " +
+                arg + " (use hl.plugin.hyprtasking.is_active() instead)"};
 }
 
-// TODO: remove when hyprlang support is dropped
 static SDispatchResult dispatch_if(std::string arg, bool is_active) {
     if (ht_manager == nullptr)
         return {.passEvent = true, .success = false, .error = "ht_manager is null"};
@@ -86,9 +72,6 @@ static SDispatchResult dispatch_if(std::string arg, bool is_active) {
             // silently exit with no error cuz hyprland
             // does not have support for error silencing on lua side
             case Config::CONFIG_LUA: return {};
-            case Config::CONFIG_LEGACY:
-                return {.passEvent = true, .success = false, .error = "predicate not met"};
-                ;
             default: return {.success = false, .error = "what config did vaxry cook again??"};
         }
     }
@@ -117,8 +100,8 @@ static void set_layer(PHTVIEW view, int new_layer) {
     if (view->closing)
         return;
     const PHLMONITOR monitor = view->get_monitor();
-    Log::logger->log(LOG, "[Hyprtasking] View \"{}\", previous layer: {}, new: {}",
-                     monitor == nullptr ? "?" : monitor->m_name, view->layout->layer, new_layer);
+    LOG(Log::DEBUG, "[Hyprtasking] View \"{}\", previous layer: {}, new: {}",
+        monitor == nullptr ? "?" : monitor->m_name, view->layout->layer, new_layer);
     view->layout->layer = new_layer;
 }
 
@@ -151,7 +134,7 @@ static SDispatchResult change_layer(std::string arg, bool move_window) {
     const PHLWORKSPACE active_workspace = monitor->m_activeWorkspace;
     if (active_workspace == nullptr)
         return {.success = false, .error = "active_workspace is null"};
-    const WORKSPACEID source_ws_id = active_workspace->m_id;
+    const WORKSPACEID source_ws_id = HT::workspace_id(active_workspace);
 
     auto*             grid   = static_cast<HTLayoutGrid*>(cursor_view->layout.get());
     const auto        src_it = grid->cache().find(source_ws_id);
@@ -259,56 +242,59 @@ DISPATCHER(killhovered) {
     return wrap(closeWindow(hovered_window));
 }
 
-static void hook_render_workspace(void* thisptr, PHLMONITOR monitor, PHLWORKSPACE workspace,
-                                  const Time::steady_tp& now, const CBox& geometry) {
+static void hook_render_workspace(void* thisptr, CRenderContext& ctx, PHLMONITOR monitor,
+                                  PHLWORKSPACE workspace, const Time::steady_tp& now,
+                                  const CBox& geometry) {
     if (ht_manager == nullptr) {
-        ((render_workspace_t)(render_workspace_hook->m_original))(thisptr, monitor, workspace, now,
-                                                                  geometry);
+        ((render_workspace_t)(render_workspace_hook->m_original))(thisptr, ctx, monitor, workspace,
+                                                                  now, geometry);
         return;
     }
     const PHTVIEW view = ht_manager->get_view_from_monitor(monitor);
     if (view != nullptr && (view->navigating || ht_manager->has_active_view())) {
         // Moving workspaces between monitors mid-frame is unsafe; rules are enforced on show.
         ht_manager->refresh_grid_caches_if_dirty(false);
-        view->layout->render();
+        view->layout->render(ctx);
     } else {
-        ((render_workspace_t)(render_workspace_hook->m_original))(thisptr, monitor, workspace, now,
-                                                                  geometry);
+        ((render_workspace_t)(render_workspace_hook->m_original))(thisptr, ctx, monitor, workspace,
+                                                                  now, geometry);
     }
 }
 
-typedef void (*render_texture_t)(void* thisptr, SP<Render::ITexture> tex, const CBox& box,
+typedef void (*render_texture_t)(void* thisptr, CRenderContext& ctx, SP<Render::ITexture> tex,
+                                 const CBox&                                     box,
                                  Render::GL::CHyprOpenGLImpl::STextureRenderData data);
 
 // True while a tile / dragged-window is being rendered through an active renderModif.
-static bool render_modif_scaled() {
-    auto& render_modif = g_pHyprRenderer->m_renderData.renderModif;
+static bool render_modif_scaled(CRenderContext& ctx) {
+    auto& render_modif = ctx.m_data.renderModif;
     return render_modif.enabled && !render_modif.modifs.empty();
 }
 
 // True only between the explicit context markers emitted around our scaled window or
 // workspace pass elements. Native renderModif paths -- workspace slides, special
 // workspaces, etc. -- remain on Hyprland's normal rendering path.
-static bool overview_scaled_render_active() {
-    return overview_scaled_render && render_modif_scaled();
+static bool overview_scaled_render_active(CRenderContext& ctx) {
+    return overview_scaled_render && render_modif_scaled(ctx);
 }
 
 // Hyprland applies the active renderModif to a texture's quad, but NOT to any of the
 // regions it derives the per-surface scissor from. renderTextureInternal scissors to
-// m_renderData.clipBox / data.clipRegion when either is set, else to data.damage --
+// ctx.m_data.clipBox / data.clipRegion when either is set, else to data.damage --
 // all in the window's UNtransformed coordinates (and data.damage is only the damaged
 // slice of the frame). Under hyprtasking's scaled overview / dragged-window renderModif
 // the renderModif already confines each quad to its tile, so the scissor only ever cuts
 // contents off at the tile edges. Drop the clip regions and scissor to the whole monitor
 // so scaled surfaces are never clipped. Gated on an active renderModif, so normal desktop
 // rendering (and its damage tracking) is untouched.
-static void hook_render_texture(void* thisptr, SP<Render::ITexture> tex, const CBox& box,
+static void hook_render_texture(void* thisptr, CRenderContext& ctx, SP<Render::ITexture> tex,
+                                const CBox&                                     box,
                                 Render::GL::CHyprOpenGLImpl::STextureRenderData data) {
-    auto& render_data  = g_pHyprRenderer->m_renderData;
+    auto& render_data  = ctx.m_data;
     auto& render_modif = render_data.renderModif;
 
-    if (!overview_scaled_render_active() || render_data.pMonitor == nullptr) {
-        ((render_texture_t)(render_texture_hook->m_original))(thisptr, tex, box, data);
+    if (!overview_scaled_render_active(ctx) || render_data.pMonitor == nullptr) {
+        ((render_texture_t)(render_texture_hook->m_original))(thisptr, ctx, tex, box, data);
         return;
     }
 
@@ -332,34 +318,35 @@ static void hook_render_texture(void* thisptr, SP<Render::ITexture> tex, const C
         render_modif.applyToBox(tbox);
         const auto saved_modif = render_modif;
         render_modif.enabled   = false;
-        ((render_texture_t)(render_texture_hook->m_original))(thisptr, tex, tbox, data);
+        ((render_texture_t)(render_texture_hook->m_original))(thisptr, ctx, tex, tbox, data);
         render_modif = saved_modif;
     } else {
-        ((render_texture_t)(render_texture_hook->m_original))(thisptr, tex, box, data);
+        ((render_texture_t)(render_texture_hook->m_original))(thisptr, ctx, tex, box, data);
     }
 
     render_data.clipBox = saved_clip_box;
 }
 
-typedef void (*render_border_t)(void* thisptr, const CBox& box,
+typedef void (*render_border_t)(void* thisptr, CRenderContext& ctx, const CBox& box,
                                 const Config::CGradientValueData&              grad,
                                 Render::GL::CHyprOpenGLImpl::SBorderRenderData data);
-typedef void (*render_border2_t)(void* thisptr, const CBox& box,
+typedef void (*render_border2_t)(void* thisptr, CRenderContext& ctx, const CBox& box,
                                  const Config::CGradientValueData& grad1,
                                  const Config::CGradientValueData& grad2, float lerp,
                                  Render::GL::CHyprOpenGLImpl::SBorderRenderData data);
 
-// renderBorder builds its border ring from `m_renderData.damage ∩ applyToBox(box)`
+// renderBorder builds its border ring from `ctx.m_data.damage ∩ applyToBox(box)`
 // (transformed) but then subtracts `box` (UNtransformed) and scissors with the result.
 // Under a scaled overview the untransformed interior swallows the whole transformed ring,
 // so no window border draws. Pre-bake the transform into the box and pre-scale the border
 // size, then disable the renderModif, so every coordinate renderBorder touches lives in
 // the same (already-scaled) space. Shared by both renderBorder overloads.
 template <typename Fn>
-static void render_border_scaled(CBox& box, Render::GL::CHyprOpenGLImpl::SBorderRenderData& data,
-                                 Fn&& call_original) {
-    auto& render_modif = g_pHyprRenderer->m_renderData.renderModif;
-    if (!overview_scaled_render_active()) {
+static void render_border_scaled(CRenderContext& ctx, CBox& box,
+                                 Render::GL::CHyprOpenGLImpl::SBorderRenderData& data,
+                                 Fn&&                                            call_original) {
+    auto& render_modif = ctx.m_data.renderModif;
+    if (!overview_scaled_render_active(ctx)) {
         call_original();
         return;
     }
@@ -371,36 +358,39 @@ static void render_border_scaled(CBox& box, Render::GL::CHyprOpenGLImpl::SBorder
     render_modif = saved_modif;
 }
 
-static void hook_render_border(void* thisptr, const CBox& box,
+static void hook_render_border(void* thisptr, CRenderContext& ctx, const CBox& box,
                                const Config::CGradientValueData&              grad,
                                Render::GL::CHyprOpenGLImpl::SBorderRenderData data) {
     CBox tbox = box;
-    render_border_scaled(tbox, data, [&] {
-        ((render_border_t)(render_border_hook->m_original))(thisptr, tbox, grad, data);
+    render_border_scaled(ctx, tbox, data, [&] {
+        ((render_border_t)(render_border_hook->m_original))(thisptr, ctx, tbox, grad, data);
     });
 }
 
-static void hook_render_border2(void* thisptr, const CBox& box,
+static void hook_render_border2(void* thisptr, CRenderContext& ctx, const CBox& box,
                                 const Config::CGradientValueData& grad1,
                                 const Config::CGradientValueData& grad2, float lerp,
                                 Render::GL::CHyprOpenGLImpl::SBorderRenderData data) {
     CBox tbox = box;
-    render_border_scaled(tbox, data, [&] {
-        ((render_border2_t)(render_border2_hook->m_original))(thisptr, tbox, grad1, grad2, lerp,
-                                                              data);
+    render_border_scaled(ctx, tbox, data, [&] {
+        ((render_border2_t)(render_border2_hook->m_original))(thisptr, ctx, tbox, grad1, grad2,
+                                                              lerp, data);
     });
 }
 
-typedef bool (*blur_optimizations_t)(void* thisptr, PHLLS pLayer, PHLWINDOW pWindow);
+typedef bool (*blur_optimizations_t)(void* thisptr, CRenderContext& ctx, PHLLS pLayer,
+                                     PHLWINDOW pWindow);
 
 // The optimized blur path samples the precomputed monitor blur framebuffer, which holds
 // the pre-overview desktop and is sampled at the wrong place once tiles are scaled. Force
 // the fresh path during a scaled render so each window's blur is taken from the current
 // framebuffer (the overview as drawn so far), clipped to its tile.
-static bool hook_blur_optimizations(void* thisptr, PHLLS pLayer, PHLWINDOW pWindow) {
-    if (overview_scaled_render_active())
+static bool hook_blur_optimizations(void* thisptr, CRenderContext& ctx, PHLLS pLayer,
+                                    PHLWINDOW pWindow) {
+    if (overview_scaled_render_active(ctx))
         return false;
-    return ((blur_optimizations_t)(blur_optimizations_hook->m_original))(thisptr, pLayer, pWindow);
+    return ((blur_optimizations_t)(blur_optimizations_hook->m_original))(thisptr, ctx, pLayer,
+                                                                         pWindow);
 }
 
 static bool hook_should_render_window(void* thisptr, PHLWINDOW window, PHLMONITOR monitor) {
@@ -526,12 +516,12 @@ static void on_config_reloaded() {
         if (view->layout->layout_name() != new_layout) {
             // The old layout's animation variables, and the hide callback they would carry,
             // are destroyed with it, so close without animating.
-            Log::logger->log(LOG, "[Hyprtasking] Changing overview layout on config reload");
+            LOG(Log::DEBUG, "[Hyprtasking] Changing overview layout on config reload");
             view->hideImmediately();
             view->change_layout(new_layout);
         } else if (HTConfig::value<Config::INTEGER>("close_overview_on_reload") && view->active &&
                    !view->closing) {
-            Log::logger->log(LOG, "[Hyprtasking] Closing overview on config reload");
+            LOG(Log::DEBUG, "[Hyprtasking] Closing overview on config reload");
             view->hide(false);
         }
     }
@@ -541,14 +531,19 @@ static void on_config_reloaded() {
 }
 
 static void init_functions() {
-    bool        success = true;
+    bool success = true;
 
-    static auto FNS1 = HyprlandAPI::findFunctionsByName(PHANDLE, "renderWorkspace");
+    // renderWorkspace is overloaded; hook the monitor/geometry variant.
+    static auto FNS1 = HyprlandAPI::findFunctionsByName(
+        PHANDLE,
+        "_ZN6Render13IHyprRenderer15renderWorkspaceERNS_14CRenderContextEN9Hyprutils6Memory14CSha"
+        "redPointerIN7Monitor8CMonitorEEENS5_IN9Workspace12CHLWorkspaceEEERKNSt6chrono10time_poin"
+        "tINSC_3_V212steady_clockENSC_8durationIlSt5ratioILl1ELl1000000000EEEEEERKNS3_4Math4CBoxE");
     if (FNS1.empty())
         fail_exit("No renderWorkspace!");
     render_workspace_hook =
         HyprlandAPI::createFunctionHook(PHANDLE, FNS1[0].address, (void*)hook_render_workspace);
-    Log::logger->log(LOG, "[Hyprtasking] Attempting hook {}", FNS1[0].signature);
+    LOG(Log::DEBUG, "[Hyprtasking] Attempting hook {}", FNS1[0].signature);
     success = render_workspace_hook->hook();
 
     // Specific renderTexture overload taking STextureRenderData (several functions
@@ -556,49 +551,49 @@ static void init_functions() {
     // with the active renderModif so scaled overview renders aren't culled.
     static auto FNS_RT = HyprlandAPI::findFunctionsByName(
         PHANDLE,
-        "_ZN6Render2GL15CHyprOpenGLImpl13renderTextureEN9Hyprutils6Memory14CSharedPointerINS_"
-        "8ITextureEEERKNS2_4Math4CBoxENS1_18STextureRenderDataE");
+        "_ZN6Render2GL15CHyprOpenGLImpl13renderTextureERNS_14CRenderContextEN9Hyprutils6Memory14CS"
+        "haredPointerINS_8ITextureEEERKNS4_4Math4CBoxENS1_18STextureRenderDataE");
     if (FNS_RT.empty())
         fail_exit("No renderTexture");
     render_texture_hook =
         HyprlandAPI::createFunctionHook(PHANDLE, FNS_RT[0].address, (void*)hook_render_texture);
-    Log::logger->log(LOG, "[Hyprtasking] Attempting hook {}", FNS_RT[0].signature);
+    LOG(Log::DEBUG, "[Hyprtasking] Attempting hook {}", FNS_RT[0].signature);
     success = render_texture_hook->hook() && success;
 
     // Both renderBorder overloads, kept in sync with the active renderModif so scaled
     // overview window borders aren't culled (see render_border_scaled).
     static auto FNS_RB = HyprlandAPI::findFunctionsByName(
         PHANDLE,
-        "_ZN6Render2GL15CHyprOpenGLImpl12renderBorderERKN9Hyprutils4Math4CBoxERKN6Config18CGradient"
-        "ValueDataENS1_17SBorderRenderDataE");
+        "_ZN6Render2GL15CHyprOpenGLImpl12renderBorderERNS_14CRenderContextERKN9Hyprutils4Math4CBox"
+        "ERKN6Config18CGradientValueDataENS1_17SBorderRenderDataE");
     if (FNS_RB.empty())
         fail_exit("No renderBorder");
     render_border_hook =
         HyprlandAPI::createFunctionHook(PHANDLE, FNS_RB[0].address, (void*)hook_render_border);
-    Log::logger->log(LOG, "[Hyprtasking] Attempting hook {}", FNS_RB[0].signature);
+    LOG(Log::DEBUG, "[Hyprtasking] Attempting hook {}", FNS_RB[0].signature);
     success = render_border_hook->hook() && success;
 
     static auto FNS_RB2 = HyprlandAPI::findFunctionsByName(
         PHANDLE,
-        "_ZN6Render2GL15CHyprOpenGLImpl12renderBorderERKN9Hyprutils4Math4CBoxERKN6Config18CGradient"
-        "ValueDataESA_fNS1_17SBorderRenderDataE");
+        "_ZN6Render2GL15CHyprOpenGLImpl12renderBorderERNS_14CRenderContextERKN9Hyprutils4Math4CBox"
+        "ERKN6Config18CGradientValueDataESC_fNS1_17SBorderRenderDataE");
     if (FNS_RB2.empty())
         fail_exit("No renderBorder (lerp)");
     render_border2_hook =
         HyprlandAPI::createFunctionHook(PHANDLE, FNS_RB2[0].address, (void*)hook_render_border2);
-    Log::logger->log(LOG, "[Hyprtasking] Attempting hook {}", FNS_RB2[0].signature);
+    LOG(Log::DEBUG, "[Hyprtasking] Attempting hook {}", FNS_RB2[0].signature);
     success = render_border2_hook->hook() && success;
 
     // Force the fresh blur path during scaled renders (see hook_blur_optimizations).
     static auto FNS_BO = HyprlandAPI::findFunctionsByName(
         PHANDLE,
-        "_ZN6Render13IHyprRenderer29shouldUseNewBlurOptimizationsEN9Hyprutils6Memory14CSharedPointe"
-        "rIN7Desktop4View13CLayerSurfaceEEENS3_INS5_7CWindowEEE");
+        "_ZN6Render13IHyprRenderer29shouldUseNewBlurOptimizationsERNS_14CRenderContextEN9Hyprutils"
+        "6Memory14CSharedPointerIN7Desktop4View13CLayerSurfaceEEENS5_INS7_7CWindowEEE");
     if (FNS_BO.empty())
         fail_exit("No shouldUseNewBlurOptimizations");
     blur_optimizations_hook =
         HyprlandAPI::createFunctionHook(PHANDLE, FNS_BO[0].address, (void*)hook_blur_optimizations);
-    Log::logger->log(LOG, "[Hyprtasking] Attempting hook {}", FNS_BO[0].signature);
+    LOG(Log::DEBUG, "[Hyprtasking] Attempting hook {}", FNS_BO[0].signature);
     success = blur_optimizations_hook->hook() && success;
 
     // make sure this signature has "CMonitor"!
@@ -610,7 +605,7 @@ static void init_functions() {
         fail_exit("No shouldRenderWindow");
     should_render_window_hook =
         HyprlandAPI::createFunctionHook(PHANDLE, FNS2[0].address, (void*)hook_should_render_window);
-    Log::logger->log(LOG, "[Hyprtasking] Attempting hook {}", FNS2[0].signature);
+    LOG(Log::DEBUG, "[Hyprtasking] Attempting hook {}", FNS2[0].signature);
     success = should_render_window_hook->hook() && success;
 
     // Right now (in v0.54.0) there are several "renderWindow" functions
@@ -621,9 +616,10 @@ static void init_functions() {
     // strings /usr/bin/hyprland | grep renderWindow
     static auto FNS3 = HyprlandAPI::findFunctionsByName(
         PHANDLE,
-        "_ZN6Render13IHyprRenderer12renderWindowEN9Hyprutils6Memory14CSharedPointerIN7Desktop4View7"
-        "CWindowEEENS3_IN7Monitor8CMonitorEEERKNSt6chrono10time_pointINSB_3_V212steady_clockENSB_"
-        "8durationIlSt5ratioILl1ELl1000000000EEEEEEbNS_15eRenderPassModeEbb");
+        "_ZN6Render13IHyprRenderer12renderWindowERNS_14CRenderContextEN9Hyprutils6Memory14CSharedPo"
+        "interIN7Desktop4View7CWindowEEENS5_IN7Monitor8CMonitorEEERKNS_25SWindowRenderPresentationE"
+        "RKNSt6chrono10time_pointINSG_3_V212steady_clockENSG_8durationIlSt5ratioILl1ELl1000000000EE"
+        "EEEEbNS_15eRenderPassModeEbb");
     if (FNS3.empty())
         fail_exit("No renderWindow");
     render_window = FNS3[0].address;
@@ -634,7 +630,7 @@ static void init_functions() {
 
     is_solitary_blocked_hook =
         HyprlandAPI::createFunctionHook(PHANDLE, FNS4[0].address, (void*)hook_is_solitary_blocked);
-    Log::logger->log(LOG, "[Hyprtasking] Attempting hook {}", FNS4[0].signature);
+    LOG(Log::DEBUG, "[Hyprtasking] Attempting hook {}", FNS4[0].signature);
     success = is_solitary_blocked_hook->hook() && success;
 
     if (!success)
@@ -668,7 +664,7 @@ static void register_callbacks() {
         Event::bus()->m_events.monitor.layoutChanged.listen(register_monitors));
 
     // Synthetic slot IDs must not alias workspaces that appear on, or move to, other monitors.
-    callbackListeners.push_back(Event::bus()->m_events.workspace.created.listen(
+    callbackListeners.push_back(Event::bus()->m_events.workspace.createdEarly.listen(
         [](PHLWORKSPACEREF) { mark_grid_caches_dirty(); }));
     callbackListeners.push_back(Event::bus()->m_events.workspace.removed.listen(
         [](PHLWORKSPACEREF) { mark_grid_caches_dirty(); }));
@@ -713,8 +709,7 @@ static void add_dispatchers() {
                                                           (value)__VA_OPT__(, ) __VA_ARGS__);      \
         const auto                 RET    = Config::mgr()->registerPluginValue(PHANDLE, ivalue);   \
         if (!RET) {                                                                                \
-            Log::logger->log(ERR, "[Hyprtasking] could not register value \"{}\"",                 \
-                             ivalue->name());                                                      \
+            LOG(Log::ERR, "[Hyprtasking] could not register value \"{}\"", ivalue->name());        \
         }                                                                                          \
     } while (0)
 
@@ -789,11 +784,11 @@ void initializeWorkspaceOverview(HANDLE handle) {
     init_functions();
     register_monitors();
 
-    Log::logger->log(LOG, "[Hyprtasking] Plugin initialized");
+    LOG(Log::DEBUG, "[Hyprtasking] Plugin initialized");
 }
 
 void shutdownWorkspaceOverview() {
-    Log::logger->log(LOG, "[Hyprtasking] Plugin exiting");
+    LOG(Log::DEBUG, "[Hyprtasking] Plugin exiting");
     callbackListeners.clear();
     if (ht_manager == nullptr)
         return;
