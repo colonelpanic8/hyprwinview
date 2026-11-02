@@ -115,6 +115,18 @@
           touch "$out"
         '';
 
+      audio-attribution =
+        pkgs.runCommand "hyprwinview-audio-attribution-tests" {
+          inherit src;
+          nativeBuildInputs = [pkgs.gcc];
+        } ''
+          c++ -std=c++23 -O1 -g -Wall -Wextra -Werror -Wno-missing-field-initializers \
+            -fsanitize=address,undefined -fno-sanitize-recover=undefined -I"$src/src" \
+            "$src/tests/audio_attribution.cpp" "$src/src/audio/attribution.cpp" -o test-audio
+          ./test-audio
+          touch "$out"
+        '';
+
       workspace-behavior =
         pkgs.runCommand "hyprwinview-workspace-behavior-tests" {
           inherit src;
