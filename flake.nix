@@ -119,11 +119,15 @@
         pkgs.runCommand "hyprwinview-audio-attribution-tests" {
           inherit src;
           nativeBuildInputs = [pkgs.gcc];
+          buildInputs = [pkgs.glaze];
         } ''
-          c++ -std=c++23 -O1 -g -Wall -Wextra -Werror -Wno-missing-field-initializers \
-            -fsanitize=address,undefined -fno-sanitize-recover=undefined -I"$src/src" \
-            "$src/tests/audio_attribution.cpp" "$src/src/audio/attribution.cpp" -o test-audio
+          flags="-std=c++23 -O1 -g -Wall -Wextra -Werror -Wno-missing-field-initializers
+            -fsanitize=address,undefined -fno-sanitize-recover=undefined -I$src/src"
+          c++ $flags "$src/tests/audio_attribution.cpp" "$src/src/audio/attribution.cpp" \
+            -o test-audio
           ./test-audio
+          c++ $flags "$src/tests/audio_pw_dump.cpp" "$src/src/audio/pw_dump.cpp" -o test-pw-dump
+          ./test-pw-dump
           touch "$out"
         '';
 

@@ -31,3 +31,12 @@ test-icons:
 # Exercise filter editing and layer commands without a compositor.
 test-overview:
     nix build -L ".#checks.$(nix eval --raw --impure --expr builtins.currentSystem).overview-behavior"
+
+# Run the experimental audio attribution against the live session, without loading the plugin.
+audio-attribution *args:
+    mkdir -p build
+    nix develop --command bash -c 'c++ -std=c++23 -O1 -g -Wall -Wextra -Isrc \
+        tools/audio-attribution/main.cpp src/audio/attribution.cpp src/audio/pw_dump.cpp \
+        src/audio/pipewire_streams.cpp src/audio/media_sessions.cpp src/audio/proc.cpp \
+        $(pkg-config --cflags --libs libsystemd) -o build/audio-attribution'
+    ./build/audio-attribution {{args}}

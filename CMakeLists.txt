@@ -25,6 +25,7 @@ pkg_check_modules(deps REQUIRED IMPORTED_TARGET
     librsvg-2.0
     libdrm
     libinput
+    libsystemd
     libudev
     pangocairo
     pixman-1
@@ -33,8 +34,9 @@ pkg_check_modules(deps REQUIRED IMPORTED_TARGET
 )
 
 pkg_search_module(lua REQUIRED IMPORTED_TARGET lua55 lua5.5 lua-5.5 "lua>=5.5")
+find_package(glaze REQUIRED)
 
-target_link_libraries(hyprwinview PRIVATE rt Threads::Threads PkgConfig::deps PkgConfig::lua)
+target_link_libraries(hyprwinview PRIVATE rt Threads::Threads PkgConfig::deps PkgConfig::lua glaze::glaze)
 
 install(TARGETS hyprwinview)
 install(FILES
