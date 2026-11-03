@@ -11,6 +11,7 @@
 #include <hyprland/src/render/Renderer.hpp>
 #include <hyprland/src/render/pass/PassElement.hpp>
 #include <hyprland/src/render/pass/RendererHintsPassElement.hpp>
+#include <hyprland/src/desktop/view/window/WindowEffectsController.hpp>
 #include <hyprland/src/desktop/view/window/WindowPresentation.hpp>
 #include <hyprutils/math/Vector2D.hpp>
 
@@ -79,6 +80,13 @@ void render_window_at_box(CRenderContext& ctx, PHLWINDOW window, PHLMONITOR moni
     const auto window_size = window->sizeAnimation()->value();
     if (window_size.x <= 0 || window_size.y <= 0)
         return;
+
+    // renderWindow sends a window with active transformers (wobble, motion blur) through a
+    // separate pass placed at the window's real position, ignoring ignorePosition and the
+    // scale/translate below, so the clip drops it. A window dragged in the overview wobbles
+    // continuously, which hid its preview. Drop the effects for windows drawn here.
+    if (window->effects().hasActiveTransformers())
+        window->effects().reset();
 
     box.x -= monitor->m_position.x;
     box.y -= monitor->m_position.y;
