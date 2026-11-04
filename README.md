@@ -275,6 +275,11 @@ On Hyprland 0.54 and older hyprlang configs, the same options live under
 
 ## Audio Badges (Experimental)
 
+Audio badges are built when libsystemd and glaze are available. Without them,
+or with `-DHYPRWINVIEW_AUDIO=OFF`, the plugin builds without the feature and
+`hyprwinview.configure_audio` is not registered. `-DHYPRWINVIEW_AUDIO=ON` makes
+missing dependencies a build error.
+
 Set `show_audio_icon = 1` to badge each window overview tile whose window is
 playing sound. `audio_icon_size` (default `22`) and `audio_icon_position`
 (`"top left"`, `"top right"`, `"bottom left"`, or `"bottom right"`; default

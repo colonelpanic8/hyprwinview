@@ -36,7 +36,10 @@
     workspaceSourceFileArgs =
       lib.concatMapStringsSep " " lib.escapeShellArg
       (lib.filter (file: lib.hasPrefix "src/workspace/" file && lib.hasSuffix ".cpp" file) sourceFiles);
-    tidySourceFiles = lib.filter (file: !(lib.hasPrefix "src/workspace/" file) && lib.hasSuffix ".cpp" file) sourceFiles;
+    # The audio stub is compiled only when audio is disabled, so it is absent from compile_commands.
+    tidySourceFiles =
+      lib.filter (file: !(lib.hasPrefix "src/workspace/" file) && lib.hasSuffix ".cpp" file && file != "src/audio/disabled.cpp")
+      sourceFiles;
     tidySourceFileArgs = lib.concatMapStringsSep " " lib.escapeShellArg tidySourceFiles;
     hyprpmManifest = builtins.fromTOML (builtins.readFile ./hyprpm.toml);
     hyprpmBuildCommands =
@@ -60,6 +63,7 @@
 
         inherit (hyprlandPkg) nativeBuildInputs;
         buildInputs = [pkgs.librsvg];
+        cmakeFlags = ["-DHYPRWINVIEW_AUDIO=ON"];
 
         meta = {
           description = "Window and workspace overviews for Hyprland";
@@ -163,6 +167,10 @@
           ./test-loader "$TMPDIR/loader"
           touch "$out"
         '';
+
+      audio-disabled-build = self.packages.${system}.default.overrideAttrs {
+        cmakeFlags = ["-DHYPRWINVIEW_AUDIO=OFF"];
+      };
 
       clang-format =
         pkgs.runCommand "hyprwinview-clang-format-check" {
