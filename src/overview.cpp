@@ -36,6 +36,7 @@
 #include <xkbcommon/xkbcommon.h>
 
 #include "app_icon.hpp"
+#include "audio/indicator.hpp"
 #include "globals.hpp"
 #include "settings.hpp"
 #include "config_helpers.hpp"
@@ -640,6 +641,9 @@ void CWindowOverview::drawForeground(Render::CRenderContext& ctx) {
                     ctx, ICON, iconBox, {.damage = &fullDamage, .a = (float)tileVisible});
             }
         }
+
+        Winview::drawAudioBadge(ctx, pMonitor.lock(), preview.window, tilePx, tileVisible,
+                                fullDamage);
 
         if (SHOW_TEXT) {
             const int  PADDING   = TEXT_PADDING;

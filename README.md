@@ -273,6 +273,75 @@ that intermediate plane.
 On Hyprland 0.54 and older hyprlang configs, the same options live under
 `plugin { hyprwinview { ... } }`.
 
+## Audio Badges (Experimental)
+
+Set `show_audio_icon = 1` to badge each window overview tile whose window is
+playing sound. `audio_icon_size` (default `22`) and `audio_icon_position`
+(`"top left"`, `"top right"`, `"bottom left"`, or `"bottom right"`; default
+`"top right"`) place the badge in a corner of the tile. Its margins, backplate
+color, and padding reuse the `app_icon_margin_*` and `app_icon_backplate_*`
+settings. A bright
+speaker with two waves means the sound was traced to that window. A dim speaker
+with one wave means it came from that application but could not be narrowed to
+one of its windows.
+
+The feature is off by default and runs nothing while off. Changing
+`show_audio_icon` at runtime starts or stops it immediately, so a keybind can
+toggle it:
+
+```lua
+hl.bind("SUPER + SHIFT + A", function()
+    local on = hl.get_config("plugin.hyprwinview.show_audio_icon") ~= 0
+    hl.config({ plugin = { hyprwinview = { show_audio_icon = on and 0 or 1 } } })
+end)
+```
+
+The plugin gathers evidence without loading the audio stack into the
+compositor:
+
+1. A `pw-dump -m -N` child process reports PipeWire playback streams. A stream
+   counts when it is running, not muted, and has a nonzero channel volume.
+2. The stream's PID comes from `application.process.id` for PulseAudio clients
+   and from the PipeWire client's `pipewire.sec.pid` for native ones.
+3. The owner is the X11 window whose id the stream names, else the first process
+   in the stream's parent-PID chain that owns windows, else windows whose class
+   matches the stream's app id, binary, or application name.
+4. When the owner has several windows, the titles of playing MPRIS players
+   (from the session bus) pick the window whose title contains them. Only
+   players whose PID is in the stream's process chain or owns a candidate window
+   count, so `playerctld` is ignored. Titles shorter than 6 characters are
+   ignored.
+
+Per-application rules are set with `configure_audio`, keyed by window class:
+
+```lua
+hl.plugin.hyprwinview.configure_audio({
+    default = { disambiguate = { "media_session" }, ambiguous = "app" },
+    apps = {
+        ["google-chrome"] = { ambiguous = "none" },
+        ["blueman-manager"] = { ignore = true },
+    },
+})
+```
+
+`ignore = true` drops the application's streams. `disambiguate` lists the
+evidence used to pick one window; `"media_session"` is the only value today, and
+`{}` turns matching off. `ambiguous` says what happens when no window is picked:
+`"app"` marks all of the application's windows dimly, `"none"` marks nothing. An
+app rule overrides the `default` rule field by field. When an application's
+windows have several classes, the most common class with a rule decides. Each
+call replaces all audio rules. Like key overrides, they reset on a successful
+configuration reload that no longer sets them, and a syntax error keeps them.
+
+Known gaps:
+
+- A tab playing in the background of its window does not match any title, so
+  every window of that browser gets the dim badge.
+- Chrome exports one MPRIS player, so with two tabs playing only one is matched.
+- Picture-in-picture windows are not tied to their tab.
+- PWAs share the browser's PID, so their windows join the browser's.
+- Flatpak apps report PIDs from their own namespace, which do not match.
+
 ## Dispatchers
 
 On Hyprland 0.57, pass these commands, without the `hyprwinview:overview`

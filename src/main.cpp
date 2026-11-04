@@ -15,6 +15,7 @@
 #include <string>
 
 #include "app_icon.hpp"
+#include "audio/indicator.hpp"
 #include "dispatcher.hpp"
 #include "globals.hpp"
 #include "lua_api.hpp"
@@ -96,6 +97,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     HyprlandAPI::addDispatcherV2(PHANDLE, "hyprwinview:overview", ::onWinviewDispatcher);
     HyprlandAPI::addLuaFunction(PHANDLE, "hyprwinview", "overview", ::luaWinviewOverview);
     HyprlandAPI::addLuaFunction(PHANDLE, "hyprwinview", "configure", ::luaWinviewConfigure);
+    Winview::initAudioIndicator();
 
     initializeWorkspaceOverview(handle);
     // After the workspace overview's listeners, which overwrite `cancelled`.
@@ -126,6 +128,7 @@ APICALL EXPORT void PLUGIN_EXIT() {
     mouseButton.reset();
     resetWindowOverviewInput();
     g_pWindowOverview.reset();
+    Winview::shutdownAudioIndicator();
     shutdownWorkspaceOverview();
     clearAppIconCache();
     auto& pass = g_pHyprRenderer->context().m_pass;

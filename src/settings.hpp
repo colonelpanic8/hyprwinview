@@ -66,6 +66,11 @@
       "app icon backplate color", 0x66000000)                                                      \
     X(CIntValue, INTEGER, PAPPICONBACKPLATEPADDING, "app_icon_backplate_padding",                  \
       "app icon backplate padding", 6)                                                             \
+    X(CIntValue, INTEGER, PSHOWAUDIOICON, "show_audio_icon",                                       \
+      "show experimental audio playing badges", 0)                                                 \
+    X(CIntValue, INTEGER, PAUDIOICONSIZE, "audio_icon_size", "audio badge size", 22)               \
+    X(CStringValue, STRING, PAUDIOICONPOSITION, "audio_icon_position", "audio badge position",     \
+      "top right")                                                                                 \
     X(CIntValue, INTEGER, PSHOWWINDOWTEXT, "show_window_text",                                     \
       "show window title and class labels", 1)                                                     \
     X(CStringValue, STRING, PWINDOWTEXTFONT, "window_text_font", "window text font", "Sans")       \

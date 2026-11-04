@@ -118,8 +118,8 @@
       audio-attribution =
         pkgs.runCommand "hyprwinview-audio-attribution-tests" {
           inherit src;
-          nativeBuildInputs = [pkgs.gcc];
-          buildInputs = [pkgs.glaze];
+          nativeBuildInputs = [pkgs.gcc pkgs.pkg-config];
+          buildInputs = [pkgs.glaze pkgs.lua5_5];
         } ''
           flags="-std=c++23 -O1 -g -Wall -Wextra -Werror -Wno-missing-field-initializers
             -fsanitize=address,undefined -fno-sanitize-recover=undefined -I$src/src"
@@ -128,6 +128,10 @@
           ./test-audio
           c++ $flags "$src/tests/audio_pw_dump.cpp" "$src/src/audio/pw_dump.cpp" -o test-pw-dump
           ./test-pw-dump
+          c++ $flags $(pkg-config --cflags lua) "$src/tests/audio_lua_rules.cpp" \
+            "$src/src/audio/lua_rules.cpp" "$src/src/audio/attribution.cpp" \
+            $(pkg-config --libs lua) -o test-lua-rules
+          ASAN_OPTIONS=detect_leaks=1 LSAN_OPTIONS=use_stacks=0:use_registers=0 ./test-lua-rules
           touch "$out"
         '';
 
